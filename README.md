@@ -13,7 +13,7 @@ Concurrent reservation system สำหรับที่นั่งบนเ�
 
 ## Quick start with Kubernetes
 
-สร้าง image แล้ว deploy Pod สำหรับ Experiment 2 (concurrent แบบไม่เปิด synchronization):
+สร้าง image ก่อน แล้วเลือก manifest ให้ตรงกับ experiment ที่ต้องการ:
 
 ```bash
 docker build -t airplane-reservation:latest .
@@ -32,15 +32,21 @@ eval $(minikube docker-env)
 docker build -t airplane-reservation:latest .
 ```
 
-หลังจาก image อยู่ใน environment ที่ Kubernetes ใช้งานได้แล้ว ให้ deploy และรอ Pod พร้อม:
+| Experiment | Manifest | Server mode |
+| --- | --- | --- |
+| 1. Sequential baseline | `k8s/pod-sequential.yaml` | `sync 1` |
+| 2. Concurrent without synchronization | `k8s/pod.yaml` | `nosync 3` |
+| 3. Concurrent with synchronization | `k8s/pod-sync.yaml` | `sync 3` |
+
+ตัวอย่างเริ่มจาก Experiment 1 แล้วรอ Pod พร้อม:
 
 ```bash
-kubectl apply -f k8s/pod.yaml
+kubectl apply -f k8s/pod-sequential.yaml
 kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
 kubectl get pod airplane-reservation
 ```
 
-`k8s/pod.yaml` สร้าง Pod เดียวที่มี server 1 container และ client 5 containers โดย server เริ่มด้วย `./server nosync 3`
+ทุก manifest สร้าง Pod เดียวที่มี server 1 container และ client 5 containers ต่างกันเฉพาะ server mode/worker count
 
 เปิด client จาก terminal แยกกัน:
 
@@ -52,9 +58,14 @@ kubectl exec -it airplane-reservation -c client-4 -- ./client 4
 kubectl exec -it airplane-reservation -c client-5 -- ./client 5
 ```
 
-รัน race test แบบไม่ synchronize:
+สำหรับ Experiment 1 ให้ client 1–5 ส่ง `RESERVE 10` ตามลำดับ เพื่อดู sequential baseline
+
+สำหรับ Experiment 2 ให้ recreate Pod ด้วย manifest ที่ปิด synchronization แล้วรัน race test:
 
 ```bash
+kubectl delete -f k8s/pod-sequential.yaml
+kubectl apply -f k8s/pod.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
 bash scripts/race-test.sh
 ```
 

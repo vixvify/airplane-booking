@@ -85,7 +85,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 
 | Component | Responsibility | Source |
 | --- | --- | --- |
-| `server` | Creates/opens the queue, configures sync mode, and spawns the worker pool | `src/server/server.cpp`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
+| `server` | Creates/opens the queue, configures sync mode, and spawns the worker pool | `src/server/server.cpp`, `k8s/pod-sequential.yaml`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
 | Worker pool | Consumes request messages, dispatches commands, sends responses | `src/server/worker.cpp` |
 | Reservation domain | In-memory seat state, validation, reserve/cancel/status/list operations | `src/reservation/reservation.cpp` |
 | Synchronization | One `std::mutex` per seat when enabled | `src/reservation/reservation.cpp` |
@@ -93,7 +93,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 | Logger | Serialized console logs with sequence number | `src/utils/logger.cpp` |
 | Delay | Simulates 50–500 ms operation delay | `src/utils/delay.cpp` |
 | CLI parser | Validates positive integer arguments shared by server and client | `src/utils/cli_parser.cpp` |
-| Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
+| Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod-sequential.yaml`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
 | Load test | Concurrently sends `STATUS`, `RESERVE`, or `CANCEL` requests and measures completion, operation results, throughput, and latency | `src/load_test/load_test.cpp` |
 
 ## Current-state notes
@@ -104,6 +104,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - The Kubernetes manifests create one Pod with one server container and five client containers; client containers wait for a manual `kubectl exec` command.
 - Containers in the same Pod share IPC by default, so the manifests do not use `hostIPC: true`; this keeps the System V queue isolated from unrelated Pods on the node.
 - The server supports `sync` or `nosync` plus a configurable worker count; the default is synchronized mode with 3 workers.
+- `k8s/pod-sequential.yaml` starts the server with `sync 1` for the sequential baseline experiment.
 - The manifest starts the server with `nosync 3`, so the default Kubernetes path is the unsynchronized branch for the race-condition demo.
 - `k8s/pod-sync.yaml` starts the same topology with `sync 3` for the synchronized experiment.
 - `client.cpp` and `server.cpp` implement the executable entrypoints, including queue creation/access and request/response handling.
