@@ -6,9 +6,7 @@ Concurrent reservation system สำหรับที่นั่งบนเ�
 
 ## Requirements
 
-- Docker Engine สำหรับ build image
-- Kubernetes cluster และ `kubectl` ที่ชี้ไปยัง context ที่ใช้งานได้
-- Kubernetes ต้องเข้าถึง image `airplane-reservation:latest` ได้; Docker Desktop ใช้ image ที่ build ใน Docker เดียวกันได้ ส่วน kind/minikube อาจต้อง load image เข้า cluster เพิ่ม
+- Docker Desktop โดยเปิดใช้งาน Kubernetes และ `kubectl` ที่ชี้ไปยัง context `docker-desktop`
 - C++17 compiler และ GNU Make หากต้องการ build นอก Docker
 
 ## Quick start with Kubernetes
@@ -16,19 +14,6 @@ Concurrent reservation system สำหรับที่นั่งบนเ�
 สร้าง image ก่อน แล้วเลือก manifest ให้ตรงกับ experiment ที่ต้องการ:
 
 ```bash
-docker build -t airplane-reservation:latest .
-```
-
-ถ้าใช้ Docker Desktop Kubernetes ให้ใช้ image ที่ build ได้เลย ถ้าใช้ kind ให้ load image เข้า cluster:
-
-```bash
-kind load docker-image airplane-reservation:latest
-```
-
-ถ้าใช้ minikube ให้ build image ใน Docker environment ของ minikube แทน:
-
-```bash
-eval $(minikube docker-env)
 docker build -t airplane-reservation:latest .
 ```
 
