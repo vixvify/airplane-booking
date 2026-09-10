@@ -6,11 +6,79 @@ Concurrent reservation system สำหรับที่นั่งบนเ�
 
 ## Requirements
 
-- Linux หรือ Docker ที่รัน Linux userland ได้
-- Docker Engine สำหรับ build/run ตามขั้นตอนด้านล่าง
-- C++17 compiler และ GNU Make หาก build นอก Docker
+- Docker Engine สำหรับ build image
+- Kubernetes cluster และ `kubectl` ที่ชี้ไปยัง context ที่ใช้งานได้
+- Kubernetes ต้องเข้าถึง image `airplane-reservation:latest` ได้; Docker Desktop ใช้ image ที่ build ใน Docker เดียวกันได้ ส่วน kind/minikube อาจต้อง load image เข้า cluster เพิ่ม
+- C++17 compiler และ GNU Make หากต้องการ build นอก Docker
 
-## Build Docker image
+## Quick start with Kubernetes
+
+สร้าง image แล้ว deploy Pod สำหรับ Experiment 2 (concurrent แบบไม่เปิด synchronization):
+
+```bash
+docker build -t airplane-reservation:latest .
+```
+
+ถ้าใช้ Docker Desktop Kubernetes ให้ใช้ image ที่ build ได้เลย ถ้าใช้ kind ให้ load image เข้า cluster:
+
+```bash
+kind load docker-image airplane-reservation:latest
+```
+
+ถ้าใช้ minikube ให้ build image ใน Docker environment ของ minikube แทน:
+
+```bash
+eval $(minikube docker-env)
+docker build -t airplane-reservation:latest .
+```
+
+หลังจาก image อยู่ใน environment ที่ Kubernetes ใช้งานได้แล้ว ให้ deploy และรอ Pod พร้อม:
+
+```bash
+kubectl apply -f k8s/pod.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
+kubectl get pod airplane-reservation
+```
+
+`k8s/pod.yaml` สร้าง Pod เดียวที่มี server 1 container และ client 5 containers โดย server เริ่มด้วย `./server nosync 3`
+
+เปิด client จาก terminal แยกกัน:
+
+```bash
+kubectl exec -it airplane-reservation -c client-1 -- ./client 1
+kubectl exec -it airplane-reservation -c client-2 -- ./client 2
+kubectl exec -it airplane-reservation -c client-3 -- ./client 3
+kubectl exec -it airplane-reservation -c client-4 -- ./client 4
+kubectl exec -it airplane-reservation -c client-5 -- ./client 5
+```
+
+รัน race test แบบไม่ synchronize:
+
+```bash
+bash scripts/race-test.sh
+```
+
+สำหรับ Experiment 3 ให้ลบ Pod เดิมแล้วใช้ manifest ที่เปิด synchronization:
+
+```bash
+kubectl delete -f k8s/pod.yaml
+kubectl apply -f k8s/pod-sync.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
+```
+
+`k8s/pod-sync.yaml` ใช้ server command `./server sync 3` โดยมี client containers เหมือนเดิม การแยก manifest ช่วยให้สลับ configuration ได้โดยไม่ต้องแก้ไฟล์ระหว่าง demo
+
+Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และช่วยให้ System V queue ไม่ปะปนกับ Pod อื่นบน node เดียวกัน
+
+ลบ resource หลังจบ demo:
+
+```bash
+kubectl delete -f k8s/pod-sync.yaml
+```
+
+## Docker standalone (optional)
+
+ใช้สำหรับ debug หรือทดสอบระบบบน container เดียวโดยไม่ใช้ Kubernetes:
 
 ```bash
 docker build -t airplane-reservation:latest .
@@ -23,7 +91,6 @@ docker build -t airplane-reservation:latest .
 ```bash
 docker run -d \
   --name airplane-reservation \
-  --ipc=host \
   airplane-reservation:latest \
   sleep infinity
 ```
@@ -110,43 +177,6 @@ Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` แ
 ```
 
 จากนั้นทดลอง `RESERVE 10` แบบเดิม ระบบต้องให้สำเร็จเพียงหนึ่ง client เท่านั้น ส่วน client อื่นต้องได้ผลลัพธ์ failed เนื่องจาก transaction ตรวจสอบและ update ภายใต้ mutex ที่เกี่ยวข้อง
-
-## Run on Kubernetes
-
-```bash
-docker build -t airplane-reservation:latest .
-kubectl apply -f k8s/pod.yaml
-kubectl get pod airplane-reservation
-```
-
-`k8s/pod.yaml` สร้าง Pod เดียวที่มี server 1 container และ client 5 containers โดย server เริ่มด้วย `./server nosync 3` เพื่อใช้สาธิต Experiment 2
-
-เปิด client จาก terminal แยกกัน:
-
-```bash
-kubectl exec -it airplane-reservation -c client-1 -- ./client 1
-kubectl exec -it airplane-reservation -c client-2 -- ./client 2
-kubectl exec -it airplane-reservation -c client-3 -- ./client 3
-kubectl exec -it airplane-reservation -c client-4 -- ./client 4
-kubectl exec -it airplane-reservation -c client-5 -- ./client 5
-```
-
-รัน race test แบบไม่ synchronize:
-
-```bash
-bash scripts/race-test.sh
-```
-
-สำหรับ Experiment 3 ให้สลับไปใช้ manifest ที่เปิด synchronization:
-
-```bash
-kubectl delete -f k8s/pod.yaml
-kubectl apply -f k8s/pod-sync.yaml
-```
-
-`k8s/pod-sync.yaml` ใช้ server command `./server sync 3` โดยมี client containers เหมือนเดิม การใช้ Pod คนละ manifest ช่วยให้สลับ configuration ได้โดยไม่ต้องแก้ไฟล์ระหว่าง demo
-
-Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` ซึ่งจะทำให้ System V queue ไปแชร์กับ Pod อื่นบน node เดียวกัน
 
 ## Load test
 
