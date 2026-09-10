@@ -81,7 +81,7 @@ kubectl logs airplane-reservation -c server --tail=100
 kubectl delete pod airplane-reservation
 ```
 
-Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และ System V queue จะไม่ปะปนกับ Pod อื่นบน node เดียวกัน
+Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และทุก container mount โฟลเดอร์ร่วม `/ipc` ผ่าน `emptyDir` เพื่อให้ `ftok` สร้าง queue key เดียวกัน โดย queue จะไม่ปะปนกับ Pod อื่นบน node เดียวกัน
 
 ## 4. ทดสอบ client แบบ manual
 
@@ -163,7 +163,7 @@ QUIT
 - `nosync` ปิด mutex เพื่อสาธิต race condition
 - `worker_count` ต้องมากกว่า 0 และค่าเริ่มต้นคือ 3
 
-Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` และใช้ request message type `1` ส่วน response ใช้ `1000 + client_id`
+Server ใช้ queue ที่สร้างจาก `ftok("/ipc", 'A')` และใช้ request message type `1` ส่วน response ใช้ `1000 + client_id`
 
 ## 8. Experiment details เมื่อรัน executable โดยตรง
 

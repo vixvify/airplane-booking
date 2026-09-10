@@ -16,7 +16,7 @@ flowchart LR
             Delay["Random delay\n50-500 ms"]
         end
 
-        Queue[("System V message queue\nkey: ftok(/tmp, 'A')\nrequest mtype = 1\nresponse mtype = 1000 + clientId")]
+        Queue[("System V message queue\nkey: ftok(/ipc, 'A')\nrequest mtype = 1\nresponse mtype = 1000 + clientId")]
 
         C1["client-1\n./client 1"]
         C2["client-2\n./client 2"]
@@ -103,6 +103,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - Clients communicate through the same System V queue. Responses are routed by `1000 + clientId`.
 - The Kubernetes manifests create one Pod with one server container and five client containers; client containers wait for a manual `kubectl exec` command.
 - Containers in the same Pod share IPC by default, so the manifests do not use `hostIPC: true`; this keeps the System V queue isolated from unrelated Pods on the node.
+- Every container mounts the same Pod-local `emptyDir` at `/ipc`, so `ftok` sees the same path metadata and all processes derive the same queue key.
 - The server supports `sync` or `nosync` plus a configurable worker count; the default is synchronized mode with 3 workers.
 - `k8s/pod-sequential.yaml` starts the server with `sync 1` for the sequential baseline experiment.
 - The manifest starts the server with `nosync 3`, so the default Kubernetes path is the unsynchronized branch for the race-condition demo.
@@ -118,5 +119,5 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - 3 default worker threads
 - Request message type `1`
 - Response message type `1000 + clientId`
-- Queue key source `/tmp` with project id `'A'`
+- Queue key source `/ipc` with project id `'A'`; Kubernetes mounts `/ipc` as a shared Pod-local `emptyDir`
 - Simulated delay between 50 and 500 ms

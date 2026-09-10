@@ -14,7 +14,7 @@ constexpr int MAX_DELAY_MS = 500;
 
 constexpr int AVAILABLE = 0;
 
-constexpr const char* QUEUE_PATH = "/tmp";
+constexpr const char* QUEUE_PATH = "/ipc";
 constexpr int QUEUE_PROJECT_ID = 'A';
 
 }

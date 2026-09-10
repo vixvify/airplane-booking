@@ -7,5 +7,6 @@ COPY src ./src
 COPY scripts ./scripts
 
 RUN make
+RUN mkdir -p /ipc
 
 CMD ["sleep", "infinity"]
