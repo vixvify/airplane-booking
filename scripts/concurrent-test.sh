@@ -4,7 +4,7 @@ POD_NAME="airplane-reservation"
 SEAT_ID=10
 
 echo "===================================="
-echo " Airplane Reservation Race Test"
+echo " Airplane Reservation Concurrent Test"
 echo "===================================="
 echo "Target seat: $SEAT_ID"
 echo
@@ -27,4 +27,4 @@ kubectl exec "$POD_NAME" -c client-5 -- \
 wait
 
 echo
-echo "Race test finished."
+echo "Concurrent reservation test finished."
