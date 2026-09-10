@@ -11,8 +11,8 @@ spec:
       imagePullPolicy: Never
       command:
         - "./server"
-        - "nosync"
-        - "3"
+        - "sync"
+        - "1"
       volumeMounts:
         - name: ipc-shared
           mountPath: /ipc

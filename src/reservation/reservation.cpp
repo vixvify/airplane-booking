@@ -259,6 +259,12 @@ string reserveSeats(
         );
     }
 
+    logMessage(
+        workerId,
+        clientId,
+        "entering critical section for RESERVE"
+    );
+
     for (int seatId : seatIds) {
 
         int index = seatId - 1;
@@ -267,6 +273,12 @@ string reserveSeats(
             seats[index]
             != Constants::AVAILABLE
         ) {
+
+            logMessage(
+                workerId,
+                clientId,
+                "leaving critical section: RESERVE transaction cancelled"
+            );
 
             return
                 "FAILED: Transaction cancelled because Seat "
@@ -328,6 +340,12 @@ string reserveSeats(
                 << " is already reserved\n";
         }
     }
+
+    logMessage(
+        workerId,
+        clientId,
+        "leaving critical section for RESERVE"
+    );
 
     return result.str();
 }
@@ -455,21 +473,33 @@ string cancelSeats(
         );
     }
 
+    logMessage(
+        workerId,
+        clientId,
+        "entering critical section for CANCEL"
+    );
+
     for (int seatId : seatIds) {
 
-    int index = seatId - 1;
+        int index = seatId - 1;
 
-    if (
-        seats[index]
-        != clientId
-    ) {
+        if (
+            seats[index]
+            != clientId
+        ) {
 
-        return
-            "FAILED: Transaction cancelled because Seat "
-            + to_string(seatId)
-            + " cannot be cancelled";
+            logMessage(
+                workerId,
+                clientId,
+                "leaving critical section: CANCEL transaction cancelled"
+            );
+
+            return
+                "FAILED: Transaction cancelled because Seat "
+                + to_string(seatId)
+                + " cannot be cancelled";
+        }
     }
-}
 
     stringstream result;
 
@@ -521,6 +551,12 @@ string cancelSeats(
             << seatId
             << " cancelled\n";
     }
+
+    logMessage(
+        workerId,
+        clientId,
+        "leaving critical section for CANCEL"
+    );
 
     return result.str();
 }

@@ -35,3 +35,4 @@ jobs:
         run: |
           test -f server
           test -f client
+          test -f load_test
