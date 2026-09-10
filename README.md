@@ -7,33 +7,85 @@ Concurrent reservation system สำหรับที่นั่งบนเ�
 ## Requirements
 
 - Docker Desktop โดยเปิดใช้งาน Kubernetes และ `kubectl` ที่ชี้ไปยัง context `docker-desktop`
+- Git Bash หรือ WSL สำหรับรัน `bash scripts/concurrent-test.sh`
 - C++17 compiler และ GNU Make หากต้องการ build นอก Docker
 
-## Quick start with Kubernetes
+## 1. สรุปการทดลองทั้ง 3 แบบ
 
-สร้าง image ก่อน แล้วเลือก manifest ให้ตรงกับ experiment ที่ต้องการ:
+ทั้ง 3 experiments ใช้ workload เดียวกัน: client 1–5 ยิง `RESERVE 10` พร้อมกันผ่าน `scripts/concurrent-test.sh` แล้วเปลี่ยนเฉพาะ server configuration
+
+| Experiment | Manifest | Server | ผลที่คาดหวัง |
+| --- | --- | --- | --- |
+| 1. Sequential baseline | `k8s/pod-sequential.yaml` | `sync 1` | สำเร็จ 1 client เพราะมี worker เดียว |
+| 2. Concurrent without synchronization | `k8s/pod.yaml` | `nosync 3` | อาจมีหลาย client สำเร็จ เพราะจงใจไม่มี mutex |
+| 3. Concurrent with synchronization | `k8s/pod-sync.yaml` | `sync 3` | สำเร็จ 1 client เพราะมี per-seat mutex |
+
+Exp1 ยังยิง client พร้อมกันเหมือน Exp2/3 แต่ server มี worker เดียว จึงประมวลผลทีละ request และไม่มี worker race
+
+## 2. เตรียม image และ Kubernetes
+
+สร้าง image และตรวจสอบ Kubernetes ก่อน:
 
 ```bash
 docker build -t airplane-reservation:latest .
+kubectl config use-context docker-desktop
+kubectl get nodes
 ```
 
-| Experiment | Manifest | Server mode |
-| --- | --- | --- |
-| 1. Sequential baseline | `k8s/pod-sequential.yaml` | `sync 1` |
-| 2. Concurrent without synchronization | `k8s/pod.yaml` | `nosync 3` |
-| 3. Concurrent with synchronization | `k8s/pod-sync.yaml` | `sync 3` |
+ควรเห็น node `docker-desktop` มีสถานะ `Ready` จากนั้นเริ่ม experiment ที่ต้องการตามขั้นตอนด้านล่าง
 
-ตัวอย่างเริ่มจาก Experiment 1 แล้วรอ Pod พร้อม:
+## 3. วิธีรันแต่ละ experiment
+
+ทุก experiment ใช้ขั้นตอนเหมือนกัน: ลบ Pod เก่า → apply manifest → รอ Pod พร้อม → ยิง workload → ดู server log
+
+### Experiment 1: Sequential baseline
 
 ```bash
+kubectl delete pod airplane-reservation --ignore-not-found
 kubectl apply -f k8s/pod-sequential.yaml
 kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
 kubectl get pod airplane-reservation
+bash scripts/concurrent-test.sh
+kubectl logs airplane-reservation -c server --tail=100
 ```
 
-ทุก manifest สร้าง Pod เดียวที่มี server 1 container และ client 5 containers ต่างกันเฉพาะ server mode/worker count
+### Experiment 2: Concurrent without synchronization
 
-เปิด client จาก terminal แยกกัน:
+```bash
+kubectl delete pod airplane-reservation --ignore-not-found
+kubectl apply -f k8s/pod.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
+kubectl get pod airplane-reservation
+bash scripts/concurrent-test.sh
+kubectl logs airplane-reservation -c server --tail=100
+```
+
+### Experiment 3: Concurrent with synchronization
+
+```bash
+kubectl delete pod airplane-reservation --ignore-not-found
+kubectl apply -f k8s/pod-sync.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
+kubectl get pod airplane-reservation
+bash scripts/concurrent-test.sh
+kubectl logs airplane-reservation -c server --tail=100
+```
+
+`concurrent-test.sh` ยิง `RESERVE 10` จาก client ทั้ง 5 ตัวพร้อมกัน จึงไม่ต้องเปิด terminal client แยกเอง
+
+`kubectl wait` แค่รอให้ server และ client containers พร้อม ไม่ได้สร้าง Pod เอง
+
+หลังจบการทดลอง:
+
+```bash
+kubectl delete pod airplane-reservation
+```
+
+Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และ System V queue จะไม่ปะปนกับ Pod อื่นบน node เดียวกัน
+
+## 4. ทดสอบ client แบบ manual
+
+ถ้าต้องการป้อนคำสั่งเอง ให้เปิด client แต่ละตัวใน terminal แยกกัน:
 
 ```bash
 kubectl exec -it airplane-reservation -c client-1 -- ./client 1
@@ -43,36 +95,9 @@ kubectl exec -it airplane-reservation -c client-4 -- ./client 4
 kubectl exec -it airplane-reservation -c client-5 -- ./client 5
 ```
 
-สำหรับ Experiment 1 ให้ใช้ `bash scripts/concurrent-test.sh` ได้เช่นกัน เพื่อให้ทั้งสาม experiment ใช้ workload เดียวกัน แม้ client จะยิงพร้อมกัน แต่ `sync 1` มี worker เดียว จึงประมวลผล request ทีละรายการตามลำดับใน queue และไม่เกิด concurrent worker race
+ใช้วิธีนี้สำหรับทดสอบคำสั่งทีละรายการ ส่วนการยิงพร้อมกันทั้ง 5 clients ให้ใช้ `scripts/concurrent-test.sh`
 
-สำหรับ Experiment 2 ให้ recreate Pod ด้วย manifest ที่ปิด synchronization แล้วรัน race test:
-
-```bash
-kubectl delete -f k8s/pod-sequential.yaml
-kubectl apply -f k8s/pod.yaml
-kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
-bash scripts/concurrent-test.sh
-```
-
-สำหรับ Experiment 3 ให้ลบ Pod เดิมแล้วใช้ manifest ที่เปิด synchronization:
-
-```bash
-kubectl delete -f k8s/pod.yaml
-kubectl apply -f k8s/pod-sync.yaml
-kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
-```
-
-`k8s/pod-sync.yaml` ใช้ server command `./server sync 3` โดยมี client containers เหมือนเดิม การแยก manifest ช่วยให้สลับ configuration ได้โดยไม่ต้องแก้ไฟล์ระหว่าง demo
-
-Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และช่วยให้ System V queue ไม่ปะปนกับ Pod อื่นบน node เดียวกัน
-
-ลบ resource หลังจบ demo:
-
-```bash
-kubectl delete -f k8s/pod-sync.yaml
-```
-
-## Docker standalone (optional)
+## 5. Docker standalone (optional)
 
 ใช้สำหรับ debug หรือทดสอบระบบบน container เดียวโดยไม่ใช้ Kubernetes:
 
@@ -80,7 +105,7 @@ kubectl delete -f k8s/pod-sync.yaml
 docker build -t airplane-reservation:latest .
 ```
 
-## Run one container with multiple terminals
+### Run one container with multiple terminals
 
 สร้าง container ให้ทำงานค้างไว้ก่อน:
 
@@ -109,7 +134,7 @@ docker exec -it airplane-reservation ./client 5
 
 แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id`
 
-## Commands
+## 6. Commands ใน client
 
 ```text
 LIST
@@ -128,7 +153,7 @@ CANCEL 10
 QUIT
 ```
 
-## Server options
+## 7. Server options
 
 ```text
 ./server [sync|nosync] [worker_count]
@@ -140,7 +165,9 @@ QUIT
 
 Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` และใช้ request message type `1` ส่วน response ใช้ `1000 + client_id`
 
-## Required experiments
+## 8. Experiment details เมื่อรัน executable โดยตรง
+
+ส่วนนี้เป็นรายละเอียดของโหมดเดียวกับการทดลองใน Kubernetes ด้านบน ถ้ารัน `server` ตรงบน Linux หรือ Docker ให้ใช้คำสั่งเหล่านี้แทน manifest
 
 ให้เริ่ม server ใหม่สำหรับแต่ละกรณี เพื่อให้ seat state เริ่มต้นเป็น AVAILABLE และให้ใช้ client อย่างน้อย 5 ตัวจอง seat เดียวกัน เช่น seat 10
 
@@ -174,21 +201,21 @@ Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` แ
 
 จากนั้นทดลอง `RESERVE 10` แบบเดิม ระบบต้องให้สำเร็จเพียงหนึ่ง client เท่านั้น ส่วน client อื่นต้องได้ผลลัพธ์ failed เนื่องจาก transaction ตรวจสอบและ update ภายใต้ mutex ที่เกี่ยวข้อง
 
-## Load test
+## 9. Load test
 
-`load_test` ส่ง `STATUS`, `RESERVE` หรือ `CANCEL` requests แบบ concurrent และรายงาน completion rate, ผลลัพธ์ของ operation, throughput และ average latency:
+`load_test` เป็นคนละส่วนกับ `concurrent-test.sh` โดยส่ง `STATUS`, `RESERVE` หรือ `CANCEL` requests จำนวนมากแบบ concurrent และรายงาน completion rate, ผลลัพธ์ของ operation, throughput และ average latency ต้องมี Pod กำลังทำงานอยู่ก่อน และรันใน client container ใดก็ได้:
 
 ```bash
-./load_test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
+kubectl exec airplane-reservation -c client-1 -- ./load_test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
 ```
 
 ตัวอย่าง:
 
 ```bash
-./load_test 1000 20 STATUS
-./load_test 1000 20 RESERVE
-./load_test 1000 20 RESERVE 10
-./load_test 1000 20 CANCEL
+kubectl exec airplane-reservation -c client-1 -- ./load_test 1000 20 STATUS
+kubectl exec airplane-reservation -c client-1 -- ./load_test 1000 20 RESERVE
+kubectl exec airplane-reservation -c client-1 -- ./load_test 1000 20 RESERVE 10
+kubectl exec airplane-reservation -c client-1 -- ./load_test 1000 20 CANCEL
 ```
 
 ถ้าไม่ระบุ `seat_id` ระบบจะวน target seat 1–20 ส่วนการระบุ `seat_id` จะทำให้ทุก request ยิง resource เดียวกัน เหมาะสำหรับวัด contention และ transaction behavior
@@ -196,13 +223,13 @@ Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` แ
 สำหรับวัด `CANCEL` ให้เตรียม reservation ด้วย request mapping เดิมก่อน เช่น:
 
 ```bash
-./load_test 20 20 RESERVE
-./load_test 20 20 CANCEL
+kubectl exec airplane-reservation -c client-1 -- ./load_test 20 20 RESERVE
+kubectl exec airplane-reservation -c client-1 -- ./load_test 20 20 CANCEL
 ```
 
 คำสั่งทั้งสองใช้ client id และ seat mapping เดียวกัน ทำให้ cancel ชุดที่สองสามารถยกเลิก reservation ที่สร้างโดยชุดแรกได้
 
-## Logs
+## 10. Logs
 
 Server log มี sequence number, worker id, client id, command/resource ที่กำลังทำงาน และ log การเข้า/ออก critical section เช่น:
 
@@ -213,7 +240,7 @@ Server log มี sequence number, worker id, client id, command/resource ที
 [SEQ 7] [Worker-2] [Client-2] leaving critical section for RESERVE
 ```
 
-## Build locally on Linux
+## 11. Build locally on Linux
 
 ```bash
 make
@@ -221,7 +248,7 @@ make
 
 จะได้ executable `server`, `client` และ `load_test` โดยใช้ source modules ใน `src/` โดย logic ตรวจเลข argument ที่ใช้ร่วมกันอยู่ใน `src/utils/cli_parser.cpp`
 
-## Current limitations
+## 12. Current limitations
 
 - Reservation data อยู่ใน memory ของ server process เท่านั้น และจะ reset เมื่อ server restart
 - Queue lifecycle ถูกจัดการโดย System V kernel queue; ให้ใช้ container/Pod ใหม่เมื่อเปลี่ยน experiment เพื่อแยกผลการทดลอง
