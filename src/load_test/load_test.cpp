@@ -4,6 +4,7 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <iostream>
