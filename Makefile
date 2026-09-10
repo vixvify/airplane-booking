@@ -14,7 +14,8 @@ CLIENT_SOURCES = \
 	src/utils/cli_parser.cpp
 
 LOAD_TEST_SOURCES = \
-	src/load_test/load_test.cpp
+	src/load_test/load_test.cpp \
+	src/utils/cli_parser.cpp
 
 all: server client load_test
 

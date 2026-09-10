@@ -122,17 +122,31 @@ Manifest สร้าง Pod เดียวที่มี server 1 container �
 
 ## Load test
 
-`load_test` ส่ง `STATUS` requests แบบ concurrent และรายงาน success rate, throughput และ average latency:
+`load_test` ส่ง `STATUS`, `RESERVE` หรือ `CANCEL` requests แบบ concurrent และรายงาน completion rate, ผลลัพธ์ของ operation, throughput และ average latency:
 
 ```bash
-./load_test <total_requests> <concurrency>
+./load_test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
 ```
 
 ตัวอย่าง:
 
 ```bash
-./load_test 1000 20
+./load_test 1000 20 STATUS
+./load_test 1000 20 RESERVE
+./load_test 1000 20 RESERVE 10
+./load_test 1000 20 CANCEL
 ```
+
+ถ้าไม่ระบุ `seat_id` ระบบจะวน target seat 1–20 ส่วนการระบุ `seat_id` จะทำให้ทุก request ยิง resource เดียวกัน เหมาะสำหรับวัด contention และ transaction behavior
+
+สำหรับวัด `CANCEL` ให้เตรียม reservation ด้วย request mapping เดิมก่อน เช่น:
+
+```bash
+./load_test 20 20 RESERVE
+./load_test 20 20 CANCEL
+```
+
+คำสั่งทั้งสองใช้ client id และ seat mapping เดียวกัน ทำให้ cancel ชุดที่สองสามารถยกเลิก reservation ที่สร้างโดยชุดแรกได้
 
 ## Logs
 

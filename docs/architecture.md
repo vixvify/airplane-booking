@@ -94,7 +94,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 | Delay | Simulates 50–500 ms operation delay | `src/utils/delay.cpp` |
 | CLI parser | Validates positive integer arguments shared by server and client | `src/utils/cli_parser.cpp` |
 | Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod.yaml` |
-| Load test | Concurrently sends `STATUS` requests and measures throughput/latency | `src/load_test/load_test.cpp` |
+| Load test | Concurrently sends `STATUS`, `RESERVE`, or `CANCEL` requests and measures completion, operation results, throughput, and latency | `src/load_test/load_test.cpp` |
 
 ## Current-state notes
 
@@ -107,7 +107,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - `client.cpp` and `server.cpp` implement the executable entrypoints, including queue creation/access and request/response handling.
 - `Dockerfile` copies `Makefile`, `src/`, and `scripts/` into the image before running `make`.
 - `Makefile` builds `server`, `client`, and `load_test`.
-- `load_test` sends concurrent `STATUS` requests and reports success rate, throughput, and average latency.
+- `load_test` sends concurrent `STATUS`, `RESERVE`, or `CANCEL` requests and reports completion rate, operation results, throughput, and average latency.
 
 ## Key constants
 
