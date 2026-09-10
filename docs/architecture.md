@@ -92,6 +92,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 | Message contract | Fixed-size request/response payload and message types | `src/models/message.h`, `src/constants/constants.h` |
 | Logger | Serialized console logs with sequence number | `src/utils/logger.cpp` |
 | Delay | Simulates 50–500 ms operation delay | `src/utils/delay.cpp` |
+| CLI parser | Validates positive integer arguments shared by server and client | `src/utils/cli_parser.cpp` |
 | Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod.yaml` |
 | Load test | Concurrently sends `STATUS` requests and measures throughput/latency | `src/load_test/load_test.cpp` |
 

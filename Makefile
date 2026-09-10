@@ -6,10 +6,12 @@ SERVER_SOURCES = \
 	src/server/worker.cpp \
 	src/reservation/reservation.cpp \
 	src/utils/logger.cpp \
-	src/utils/delay.cpp
+	src/utils/delay.cpp \
+	src/utils/cli_parser.cpp
 
 CLIENT_SOURCES = \
-	src/client/client.cpp
+	src/client/client.cpp \
+	src/utils/cli_parser.cpp
 
 LOAD_TEST_SOURCES = \
 	src/load_test/load_test.cpp

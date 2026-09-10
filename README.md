@@ -151,7 +151,7 @@ Server log มี sequence number, worker id, client id, command/resource ที
 make
 ```
 
-จะได้ executable `server`, `client` และ `load_test` โดยใช้ source modules ใน `src/`
+จะได้ executable `server`, `client` และ `load_test` โดยใช้ source modules ใน `src/` โดย logic ตรวจเลข argument ที่ใช้ร่วมกันอยู่ใน `src/utils/cli_parser.cpp`
 
 ## Current limitations
 

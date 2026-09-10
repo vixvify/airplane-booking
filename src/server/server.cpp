@@ -2,6 +2,7 @@
 
 #include "../constants/constants.h"
 #include "../reservation/reservation.h"
+#include "../utils/cli_parser.h"
 
 #include <sys/ipc.h>
 #include <sys/msg.h>
@@ -19,26 +20,6 @@ void printUsage(const char* program) {
     cerr
         << "Usage: " << program
         << " [sync|nosync] [worker_count]\n";
-}
-
-bool parseWorkerCount(const string& value, int& workerCount) {
-    try {
-        size_t position = 0;
-        int parsed = stoi(value, &position);
-
-        if (
-            position != value.size()
-            || parsed <= 0
-        ) {
-            return false;
-        }
-
-        workerCount = parsed;
-        return true;
-    }
-    catch (...) {
-        return false;
-    }
 }
 
 }
@@ -69,7 +50,7 @@ int main(int argc, char* argv[]) {
 
     if (
         argc == 3
-        && !parseWorkerCount(argv[2], workerCount)
+        && !parsePositiveInt(argv[2], workerCount)
     ) {
         printUsage(argv[0]);
         return 1;

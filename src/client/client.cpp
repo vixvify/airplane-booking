@@ -1,5 +1,6 @@
 #include "../constants/constants.h"
 #include "../models/message.h"
+#include "../utils/cli_parser.h"
 
 #include <sys/ipc.h>
 #include <sys/msg.h>
@@ -17,26 +18,6 @@ void printUsage(const char* program) {
     cerr << "Usage: " << program << " <client_id>\n";
 }
 
-bool parseClientId(const string& value, int& clientId) {
-    try {
-        size_t position = 0;
-        int parsed = stoi(value, &position);
-
-        if (
-            position != value.size()
-            || parsed <= 0
-        ) {
-            return false;
-        }
-
-        clientId = parsed;
-        return true;
-    }
-    catch (...) {
-        return false;
-    }
-}
-
 bool isQuitCommand(const string& command) {
     string action;
     stringstream stream(command);
@@ -51,7 +32,7 @@ int main(int argc, char* argv[]) {
 
     if (
         argc != 2
-        || !parseClientId(argv[1], clientId)
+        || !parsePositiveInt(argv[1], clientId)
     ) {
         printUsage(argv[0]);
         return 1;
