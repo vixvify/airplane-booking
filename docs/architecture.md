@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph Pod["Kubernetes Pod: airplane-reservation\nhostIPC: true"]
+    subgraph Pod["Kubernetes Pod: airplane-reservation\nshared IPC within Pod"]
         subgraph ServerContainer["server container\nairplane-reservation:latest"]
             Server["./server [sync|nosync] [worker_count]\ncreates/opens queue"]
             Workers["Worker threads\nDEFAULT_WORKER_COUNT = 3\nworker.cpp"]
@@ -85,7 +85,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 
 | Component | Responsibility | Source |
 | --- | --- | --- |
-| `server` | Creates/opens the queue, configures sync mode, and spawns the worker pool | `src/server/server.cpp`, `k8s/pod.yaml` |
+| `server` | Creates/opens the queue, configures sync mode, and spawns the worker pool | `src/server/server.cpp`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
 | Worker pool | Consumes request messages, dispatches commands, sends responses | `src/server/worker.cpp` |
 | Reservation domain | In-memory seat state, validation, reserve/cancel/status/list operations | `src/reservation/reservation.cpp` |
 | Synchronization | One `std::mutex` per seat when enabled | `src/reservation/reservation.cpp` |
@@ -93,7 +93,7 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 | Logger | Serialized console logs with sequence number | `src/utils/logger.cpp` |
 | Delay | Simulates 50–500 ms operation delay | `src/utils/delay.cpp` |
 | CLI parser | Validates positive integer arguments shared by server and client | `src/utils/cli_parser.cpp` |
-| Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod.yaml` |
+| Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
 | Load test | Concurrently sends `STATUS`, `RESERVE`, or `CANCEL` requests and measures completion, operation results, throughput, and latency | `src/load_test/load_test.cpp` |
 
 ## Current-state notes
@@ -101,9 +101,11 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - Seat state is in the server process memory (`seats[20]`); there is no database or persistent storage.
 - All workers in the server process share the same seat array and per-seat mutexes.
 - Clients communicate through the same System V queue. Responses are routed by `1000 + clientId`.
-- The Kubernetes manifest creates one Pod with one server container and five client containers, and sets `hostIPC: true`; client containers wait for a manual `kubectl exec` command.
+- The Kubernetes manifests create one Pod with one server container and five client containers; client containers wait for a manual `kubectl exec` command.
+- Containers in the same Pod share IPC by default, so the manifests do not use `hostIPC: true`; this keeps the System V queue isolated from unrelated Pods on the node.
 - The server supports `sync` or `nosync` plus a configurable worker count; the default is synchronized mode with 3 workers.
 - The manifest starts the server with `nosync 3`, so the default Kubernetes path is the unsynchronized branch for the race-condition demo.
+- `k8s/pod-sync.yaml` starts the same topology with `sync 3` for the synchronized experiment.
 - `client.cpp` and `server.cpp` implement the executable entrypoints, including queue creation/access and request/response handling.
 - `Dockerfile` copies `Makefile`, `src/`, and `scripts/` into the image before running `make`.
 - `Makefile` builds `server`, `client`, and `load_test`.

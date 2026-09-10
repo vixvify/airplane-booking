@@ -11,7 +11,7 @@ spec:
       imagePullPolicy: Never
       command:
         - "./server"
-        - "nosync"
+        - "sync"
         - "3"
 
     - name: client-1

@@ -111,14 +111,42 @@ Server ใช้ queue ที่สร้างจาก `ftok("/tmp", 'A')` แ
 
 จากนั้นทดลอง `RESERVE 10` แบบเดิม ระบบต้องให้สำเร็จเพียงหนึ่ง client เท่านั้น ส่วน client อื่นต้องได้ผลลัพธ์ failed เนื่องจาก transaction ตรวจสอบและ update ภายใต้ mutex ที่เกี่ยวข้อง
 
-## Race test script on Kubernetes
+## Run on Kubernetes
 
 ```bash
+docker build -t airplane-reservation:latest .
 kubectl apply -f k8s/pod.yaml
+kubectl get pod airplane-reservation
+```
+
+`k8s/pod.yaml` สร้าง Pod เดียวที่มี server 1 container และ client 5 containers โดย server เริ่มด้วย `./server nosync 3` เพื่อใช้สาธิต Experiment 2
+
+เปิด client จาก terminal แยกกัน:
+
+```bash
+kubectl exec -it airplane-reservation -c client-1 -- ./client 1
+kubectl exec -it airplane-reservation -c client-2 -- ./client 2
+kubectl exec -it airplane-reservation -c client-3 -- ./client 3
+kubectl exec -it airplane-reservation -c client-4 -- ./client 4
+kubectl exec -it airplane-reservation -c client-5 -- ./client 5
+```
+
+รัน race test แบบไม่ synchronize:
+
+```bash
 bash scripts/race-test.sh
 ```
 
-Manifest สร้าง Pod เดียวที่มี server 1 container และ client 5 containers โดย server เริ่มด้วย `./server nosync 3` เพื่อใช้สาธิต Experiment 2 สำหรับ Experiment 3 ให้เปลี่ยน argument เป็น `sync` แล้ว recreate Pod
+สำหรับ Experiment 3 ให้สลับไปใช้ manifest ที่เปิด synchronization:
+
+```bash
+kubectl delete -f k8s/pod.yaml
+kubectl apply -f k8s/pod-sync.yaml
+```
+
+`k8s/pod-sync.yaml` ใช้ server command `./server sync 3` โดยมี client containers เหมือนเดิม การใช้ Pod คนละ manifest ช่วยให้สลับ configuration ได้โดยไม่ต้องแก้ไฟล์ระหว่าง demo
+
+Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` ซึ่งจะทำให้ System V queue ไปแชร์กับ Pod อื่นบน node เดียวกัน
 
 ## Load test
 
