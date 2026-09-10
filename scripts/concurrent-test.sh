@@ -21,22 +21,39 @@ echo "===================================="
 echo "Target seat: $SEAT_ID"
 echo
 
-"$KUBECTL" exec "$POD_NAME" -c client-1 -- \
-  sh -c "echo 'RESERVE $SEAT_ID' | ./client 1" &
+echo "Live server logs:"
+echo "------------------------------------"
+"$KUBECTL" logs -f "$POD_NAME" -c server --tail=0 --prefix &
+LOG_PID=$!
 
-"$KUBECTL" exec "$POD_NAME" -c client-2 -- \
-  sh -c "echo 'RESERVE $SEAT_ID' | ./client 2" &
+cleanup() {
+  kill "$LOG_PID" 2>/dev/null || true
+  wait "$LOG_PID" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
 
-"$KUBECTL" exec "$POD_NAME" -c client-3 -- \
-  sh -c "echo 'RESERVE $SEAT_ID' | ./client 3" &
+run_client() {
+  local client_id="$1"
+  "$KUBECTL" exec "$POD_NAME" -c "client-$client_id" -- \
+    sh -c "echo 'RESERVE $SEAT_ID' | ./client $client_id 2>&1 | sed 's/^/[CLIENT-$client_id] /'"
+}
 
-"$KUBECTL" exec "$POD_NAME" -c client-4 -- \
-  sh -c "echo 'RESERVE $SEAT_ID' | ./client 4" &
+run_client 1 &
+CLIENT_1_PID=$!
 
-"$KUBECTL" exec "$POD_NAME" -c client-5 -- \
-  sh -c "echo 'RESERVE $SEAT_ID' | ./client 5" &
+run_client 2 &
+CLIENT_2_PID=$!
 
-wait
+run_client 3 &
+CLIENT_3_PID=$!
+
+run_client 4 &
+CLIENT_4_PID=$!
+
+run_client 5 &
+CLIENT_5_PID=$!
+
+wait "$CLIENT_1_PID" "$CLIENT_2_PID" "$CLIENT_3_PID" "$CLIENT_4_PID" "$CLIENT_5_PID"
 
 echo
 echo "Concurrent reservation test finished."

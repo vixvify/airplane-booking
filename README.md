@@ -73,6 +73,8 @@ kubectl logs airplane-reservation -c server --tail=100
 
 `concurrent-test.sh` ยิง `RESERVE 10` จาก client ทั้ง 5 ตัวพร้อมกัน จึงไม่ต้องเปิด terminal client แยกเอง
 
+ระหว่างที่ script ทำงาน จะเปิด server logs แบบ live ใน terminal เดียวกันทันที โดย Kubernetes จะเติม prefix `[pod/airplane-reservation/server]` ให้ log ฝั่ง server และ script จะเติม `[CLIENT-N]` ให้ผลลัพธ์ของแต่ละ client ส่วนคำสั่ง `kubectl logs ... --tail=100` ที่อยู่ท้ายแต่ละตัวอย่างใช้ดู log ย้อนหลังหลังจบการทดสอบ
+
 `kubectl wait` แค่รอให้ server และ client containers พร้อม ไม่ได้สร้าง Pod เอง
 
 หลังจบการทดลอง:
