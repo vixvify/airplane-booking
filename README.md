@@ -134,7 +134,7 @@ docker exec -it airplane-reservation ./client 4
 docker exec -it airplane-reservation ./client 5
 ```
 
-แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id`
+แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id` โดย request และ response ใช้ payload struct แยกกัน เพื่อให้ queue รองรับ concurrent load ได้มากขึ้น
 
 ## 6. Commands ใน client
 

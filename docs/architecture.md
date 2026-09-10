@@ -54,7 +54,7 @@ sequenceDiagram
     participant Worker as Worker thread
     participant Domain as Reservation state
 
-    Client->>Queue: msgsnd(Message{mtype=1, clientId, command})
+    Client->>Queue: msgsnd(RequestMessage{mtype=1, clientId, command})
     Worker->>Queue: msgrcv(..., mtype=1)
     Worker->>Worker: Parse LIST / STATUS / RESERVE / CANCEL / QUIT
     Worker->>Domain: Execute command
@@ -64,22 +64,27 @@ sequenceDiagram
     else nosync mode
         Domain->>Domain: Read/update seats[20] without mutex
     end
-    Worker->>Queue: msgsnd(Message{mtype=1000+clientId, response})
+    Worker->>Queue: msgsnd(ResponseMessage{mtype=1000+clientId, response})
     Client->>Queue: msgrcv(..., mtype=1000+clientId)
 ```
 
 ## Message contract
 
 ```text
-struct Message {
+struct RequestMessage {
     long mtype;       // System V routing type
     int  clientId;    // response destination and reservation owner
     char command[128];
+};
+
+struct ResponseMessage {
+    long mtype;       // System V routing type
+    int  clientId;
     char response[2048];
 };
 ```
 
-Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allowing each client to read only its own response from the shared queue.
+Requests use `RequestMessage` with `mtype = 1`. Responses use `ResponseMessage` with `mtype = 1000 + clientId`, allowing each client to read only its own response from the shared queue. Keeping request and response payloads separate prevents unused response storage from filling the queue during load tests.
 
 ## Components and responsibilities
 

@@ -114,12 +114,12 @@ void worker(
 
     while (true) {
 
-        Message request{};
+        RequestMessage request{};
 
         ssize_t received = msgrcv(
             messageQueueId,
             &request,
-            sizeof(Message)
+            sizeof(RequestMessage)
                 - sizeof(long),
             Constants::REQUEST_TYPE,
             0
@@ -150,7 +150,7 @@ void worker(
                 command
             );
 
-        Message response{};
+        ResponseMessage response{};
 
         response.mtype =
             Constants::RESPONSE_TYPE_BASE
@@ -173,7 +173,7 @@ void worker(
             msgsnd(
                 messageQueueId,
                 &response,
-                sizeof(Message)
+                sizeof(ResponseMessage)
                     - sizeof(long),
                 0
             ) == -1
