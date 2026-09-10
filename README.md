@@ -43,7 +43,7 @@ kubectl exec -it airplane-reservation -c client-4 -- ./client 4
 kubectl exec -it airplane-reservation -c client-5 -- ./client 5
 ```
 
-สำหรับ Experiment 1 ให้ client 1–5 ส่ง `RESERVE 10` ตามลำดับ เพื่อดู sequential baseline
+สำหรับ Experiment 1 ให้ใช้ `bash scripts/race-test.sh` ได้เช่นกัน เพื่อให้ทั้งสาม experiment ใช้ workload เดียวกัน แม้ client จะยิงพร้อมกัน แต่ `sync 1` มี worker เดียว จึงประมวลผล request ทีละรายการตามลำดับใน queue และไม่เกิด concurrent worker race
 
 สำหรับ Experiment 2 ให้ recreate Pod ด้วย manifest ที่ปิด synchronization แล้วรัน race test:
 
