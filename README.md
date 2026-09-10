@@ -43,7 +43,7 @@ kubectl exec -it airplane-reservation -c client-4 -- ./client 4
 kubectl exec -it airplane-reservation -c client-5 -- ./client 5
 ```
 
-สำหรับ Experiment 1 ให้ใช้ `bash scripts/race-test.sh` ได้เช่นกัน เพื่อให้ทั้งสาม experiment ใช้ workload เดียวกัน แม้ client จะยิงพร้อมกัน แต่ `sync 1` มี worker เดียว จึงประมวลผล request ทีละรายการตามลำดับใน queue และไม่เกิด concurrent worker race
+สำหรับ Experiment 1 ให้ใช้ `bash scripts/concurrent-test.sh` ได้เช่นกัน เพื่อให้ทั้งสาม experiment ใช้ workload เดียวกัน แม้ client จะยิงพร้อมกัน แต่ `sync 1` มี worker เดียว จึงประมวลผล request ทีละรายการตามลำดับใน queue และไม่เกิด concurrent worker race
 
 สำหรับ Experiment 2 ให้ recreate Pod ด้วย manifest ที่ปิด synchronization แล้วรัน race test:
 
@@ -51,7 +51,7 @@ kubectl exec -it airplane-reservation -c client-5 -- ./client 5
 kubectl delete -f k8s/pod-sequential.yaml
 kubectl apply -f k8s/pod.yaml
 kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
-bash scripts/race-test.sh
+bash scripts/concurrent-test.sh
 ```
 
 สำหรับ Experiment 3 ให้ลบ Pod เดิมแล้วใช้ manifest ที่เปิด synchronization:
