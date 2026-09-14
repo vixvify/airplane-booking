@@ -125,7 +125,7 @@ void sendRequest(
     int seatId = getSeatId(requestNumber, fixedSeatId);
     string command = makeCommand(operation, seatId);
 
-    Message request{};
+    RequestMessage request{};
     request.mtype = Constants::REQUEST_TYPE;
     request.clientId = clientId;
 
@@ -142,7 +142,7 @@ void sendRequest(
         msgsnd(
             messageQueueId,
             &request,
-            sizeof(Message) - sizeof(long),
+            sizeof(RequestMessage) - sizeof(long),
             0
         ) == -1
     ) {
@@ -150,7 +150,7 @@ void sendRequest(
         return;
     }
 
-    Message response{};
+    ResponseMessage response{};
     long responseType =
         Constants::RESPONSE_TYPE_BASE + clientId;
 
@@ -158,7 +158,7 @@ void sendRequest(
         msgrcv(
             messageQueueId,
             &response,
-            sizeof(Message) - sizeof(long),
+            sizeof(ResponseMessage) - sizeof(long),
             responseType,
             0
         ) == -1

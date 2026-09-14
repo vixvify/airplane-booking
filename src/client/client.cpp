@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
             continue;
         }
 
-        Message request{};
+        RequestMessage request{};
         request.mtype = Constants::REQUEST_TYPE;
         request.clientId = clientId;
 
@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
             msgsnd(
                 messageQueueId,
                 &request,
-                sizeof(Message) - sizeof(long),
+                sizeof(RequestMessage) - sizeof(long),
                 0
             ) == -1
         ) {
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        Message response{};
+        ResponseMessage response{};
         long responseType =
             Constants::RESPONSE_TYPE_BASE + clientId;
 
@@ -98,7 +98,7 @@ int main(int argc, char* argv[]) {
             msgrcv(
                 messageQueueId,
                 &response,
-                sizeof(Message) - sizeof(long),
+                sizeof(ResponseMessage) - sizeof(long),
                 responseType,
                 0
             ) == -1

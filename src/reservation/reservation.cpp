@@ -178,11 +178,7 @@ string reserveSeats(
     }
 
     if (!synchronizationEnabled) {
-
-        stringstream result;
-
         for (int seatId : seatIds) {
-
             int index = seatId - 1;
 
             logMessage(
@@ -194,41 +190,52 @@ string reserveSeats(
 
             if (
                 seats[index]
-                == Constants::AVAILABLE
+                != Constants::AVAILABLE
             ) {
-
                 logMessage(
                     workerId,
                     clientId,
-                    "Seat "
+                    "RESERVE transaction cancelled: Seat "
                     + to_string(seatId)
-                    + " is AVAILABLE"
+                    + " is already reserved"
                 );
 
-                randomDelay();
-
-                seats[index] = clientId;
-
-                logMessage(
-                    workerId,
-                    clientId,
-                    "Seat "
+                return
+                    "FAILED: Transaction cancelled because Seat "
                     + to_string(seatId)
-                    + " reserved"
-                );
-
-                result
-                    << "SUCCESS: Seat "
-                    << seatId
-                    << " reserved\n";
-
-            } else {
-
-                result
-                    << "FAILED: Seat "
-                    << seatId
-                    << " is already reserved\n";
+                    + " is already reserved";
             }
+
+            logMessage(
+                workerId,
+                clientId,
+                "Seat "
+                + to_string(seatId)
+                + " is AVAILABLE"
+            );
+        }
+
+        randomDelay();
+
+        stringstream result;
+
+        for (int seatId : seatIds) {
+            int index = seatId - 1;
+
+            seats[index] = clientId;
+
+            logMessage(
+                workerId,
+                clientId,
+                "Seat "
+                + to_string(seatId)
+                + " reserved"
+            );
+
+            result
+                << "SUCCESS: Seat "
+                << seatId
+                << " reserved\n";
         }
 
         return result.str();
@@ -294,51 +301,30 @@ string reserveSeats(
 
         int index = seatId - 1;
 
-        if (
-            seats[index]
-            == Constants::AVAILABLE
-        ) {
+        logMessage(
+            workerId,
+            clientId,
+            "Seat "
+            + to_string(seatId)
+            + " is AVAILABLE"
+        );
 
-            logMessage(
-                workerId,
-                clientId,
-                "Seat "
-                + to_string(seatId)
-                + " is AVAILABLE"
-            );
+        randomDelay();
 
-            randomDelay();
+        seats[index] = clientId;
 
-            seats[index] = clientId;
+        logMessage(
+            workerId,
+            clientId,
+            "Seat "
+            + to_string(seatId)
+            + " reserved"
+        );
 
-            logMessage(
-                workerId,
-                clientId,
-                "Seat "
-                + to_string(seatId)
-                + " reserved"
-            );
-
-            result
-                << "SUCCESS: Seat "
-                << seatId
-                << " reserved\n";
-
-        } else {
-
-            logMessage(
-                workerId,
-                clientId,
-                "Seat "
-                + to_string(seatId)
-                + " is already reserved"
-            );
-
-            result
-                << "FAILED: Seat "
-                << seatId
-                << " is already reserved\n";
-        }
+        result
+            << "SUCCESS: Seat "
+            << seatId
+            << " reserved\n";
     }
 
     logMessage(
@@ -386,11 +372,7 @@ string cancelSeats(
     }
 
     if (!synchronizationEnabled) {
-
-        stringstream result;
-
         for (int seatId : seatIds) {
-
             int index = seatId - 1;
 
             logMessage(
@@ -404,13 +386,18 @@ string cancelSeats(
                 seats[index]
                 == Constants::AVAILABLE
             ) {
+                logMessage(
+                    workerId,
+                    clientId,
+                    "CANCEL transaction cancelled: Seat "
+                    + to_string(seatId)
+                    + " is not reserved"
+                );
 
-                result
-                    << "FAILED: Seat "
-                    << seatId
-                    << " is not reserved\n";
-
-                continue;
+                return
+                    "FAILED: Transaction cancelled because Seat "
+                    + to_string(seatId)
+                    + " is not reserved";
             }
 
             if (
@@ -418,15 +405,27 @@ string cancelSeats(
                 != clientId
             ) {
 
-                result
-                    << "FAILED: Seat "
-                    << seatId
-                    << " belongs to another client\n";
+                logMessage(
+                    workerId,
+                    clientId,
+                    "CANCEL transaction cancelled: Seat "
+                    + to_string(seatId)
+                    + " belongs to another client"
+                );
 
-                continue;
+                return
+                    "FAILED: Transaction cancelled because Seat "
+                    + to_string(seatId)
+                    + " belongs to another client";
             }
+        }
 
-            randomDelay();
+        randomDelay();
+
+        stringstream result;
+
+        for (int seatId : seatIds) {
+            int index = seatId - 1;
 
             seats[index] =
                 Constants::AVAILABLE;
@@ -506,32 +505,6 @@ string cancelSeats(
     for (int seatId : seatIds) {
 
         int index = seatId - 1;
-
-        if (
-            seats[index]
-            == Constants::AVAILABLE
-        ) {
-
-            result
-                << "FAILED: Seat "
-                << seatId
-                << " is not reserved\n";
-
-            continue;
-        }
-
-        if (
-            seats[index]
-            != clientId
-        ) {
-
-            result
-                << "FAILED: Seat "
-                << seatId
-                << " belongs to another client\n";
-
-            continue;
-        }
 
         randomDelay();
 
