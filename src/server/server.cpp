@@ -7,14 +7,27 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
+#include <csignal>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace std;
 
 namespace {
+
+int g_messageQueueId = -1;
+
+void handleShutdown(int signalNumber) {
+    cout << "\nShutting down server (Signal " << signalNumber << ")...\n";
+    if (g_messageQueueId != -1) {
+        msgctl(g_messageQueueId, IPC_RMID, nullptr);
+        cout << "Message Queue " << g_messageQueueId << " removed successfully.\n";
+    }
+    _exit(0);
+}
 
 void printUsage(const char* program) {
     cerr
@@ -25,6 +38,9 @@ void printUsage(const char* program) {
 }
 
 int main(int argc, char* argv[]) {
+    signal(SIGINT, handleShutdown);
+    signal(SIGTERM, handleShutdown);
+
     bool synchronizationEnabled = true;
     int workerCount = Constants::DEFAULT_WORKER_COUNT;
 
@@ -77,6 +93,8 @@ int main(int argc, char* argv[]) {
         perror("msgget");
         return 1;
     }
+
+    g_messageQueueId = messageQueueId;
 
     cout
         << "Airplane Reservation Server started\n"
