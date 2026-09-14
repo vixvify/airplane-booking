@@ -84,9 +84,14 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    int oldQueueId = msgget(key, 0666);
+    if (oldQueueId != -1) {
+        msgctl(oldQueueId, IPC_RMID, nullptr);
+    }
+
     int messageQueueId = msgget(
         key,
-        IPC_CREAT | 0666
+        IPC_CREAT | IPC_EXCL | 0666
     );
 
     if (messageQueueId == -1) {
