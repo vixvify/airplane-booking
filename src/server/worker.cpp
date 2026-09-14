@@ -15,6 +15,16 @@
 
 using namespace std;
 
+namespace {
+
+bool parseSeatIds(stringstream& ss, vector<int>& seatIds) {
+    int seatId;
+    while (ss >> seatId) {
+        seatIds.push_back(seatId);
+    }
+    return ss.eof() && !seatIds.empty();
+}
+
 string processCommand(
     int workerId,
     int clientId,
@@ -50,20 +60,8 @@ string processCommand(
     if (action == "RESERVE") {
 
         vector<int> seatIds;
-
-        int seatId;
-
-        while (ss >> seatId) {
-
-            seatIds.push_back(
-                seatId
-            );
-        }
-
-        if (seatIds.empty()) {
-
-            return
-                "Usage: RESERVE <seat_id> [seat_id...]";
+        if (!parseSeatIds(ss, seatIds)) {
+            return "Usage: RESERVE <seat_id> [seat_id...]";
         }
 
         return reserveSeats(
@@ -76,20 +74,8 @@ string processCommand(
     if (action == "CANCEL") {
 
         vector<int> seatIds;
-
-        int seatId;
-
-        while (ss >> seatId) {
-
-            seatIds.push_back(
-                seatId
-            );
-        }
-
-        if (seatIds.empty()) {
-
-            return
-                "Usage: CANCEL <seat_id> [seat_id...]";
+        if (!parseSeatIds(ss, seatIds)) {
+            return "Usage: CANCEL <seat_id> [seat_id...]";
         }
 
         return cancelSeats(
@@ -107,7 +93,7 @@ string processCommand(
     return
         "ERROR: Unknown command";
 }
-
+}
 void worker(
     int workerId,
     int messageQueueId
@@ -136,6 +122,8 @@ void worker(
             perror("msgrcv");
             continue;
         }
+
+        request.command[sizeof(request.command) - 1] = '\0';
 
         string command(
             request.command
