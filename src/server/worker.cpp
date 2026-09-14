@@ -7,6 +7,7 @@
 
 #include <sys/msg.h>
 
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -126,9 +127,13 @@ void worker(
         );
 
         if (received == -1) {
-
+            if (errno == EIDRM || errno == EINVAL) {
+                break;
+            }
+            if (errno == EINTR) {
+                continue;
+            }
             perror("msgrcv");
-
             continue;
         }
 
