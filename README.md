@@ -136,6 +136,38 @@ docker exec -it airplane-reservation ./client 5
 
 แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id`
 
+### Concurrent test บน Docker
+
+ให้เปิด server ค้างไว้ใน terminal หนึ่งก่อน แล้วใช้ terminal อีกอันยิง client ทั้ง 5 ตัวพร้อมกัน
+
+ถ้าใช้ Git Bash หรือ WSL:
+
+```bash
+for i in 1 2 3 4 5; do
+  docker exec airplane-reservation \
+    sh -c "printf 'RESERVE 10\\n' | ./client $i" &
+done
+wait
+```
+
+ถ้าใช้ PowerShell:
+
+```powershell
+$jobs = 1..5 | ForEach-Object {
+    $id = $_
+    Start-Job -ScriptBlock {
+        param($id)
+        docker exec airplane-reservation sh -c "printf 'RESERVE 10\n' | ./client $id"
+    } -ArgumentList $id
+}
+
+$jobs | Wait-Job | Out-Null
+$jobs | Receive-Job
+$jobs | Remove-Job
+```
+
+คำสั่งชุดนี้เทียบเท่ากับ `scripts/concurrent-test.sh` แต่ใช้ `docker exec` แทน `kubectl exec` และจึงใช้ได้กับ Docker standalone เท่านั้น
+
 ## 6. Commands ใน client
 
 ```text
