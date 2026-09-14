@@ -1,10 +1,15 @@
 #ifndef MESSAGE_H
 #define MESSAGE_H
 
-struct Message {
+struct RequestMessage {
     long mtype;
     int clientId;
     char command[128];
+};
+
+struct ResponseMessage {
+    long mtype;
+    int clientId;
     char response[2048];
 };
 

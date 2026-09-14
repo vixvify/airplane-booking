@@ -2,17 +2,23 @@
 
 POD_NAME="airplane-reservation"
 SEAT_ID=10
-KUBECTL="${KUBECTL:-kubectl}"
 
-if ! command -v "$KUBECTL" >/dev/null 2>&1; then
-  if command -v kubectl.exe >/dev/null 2>&1; then
-    KUBECTL="kubectl.exe"
-  elif [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
-    KUBECTL="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
-  else
-    echo "kubectl was not found. Add kubectl to PATH or set KUBECTL." >&2
+if [ -n "${KUBECTL:-}" ]; then
+  if ! command -v "$KUBECTL" >/dev/null 2>&1 && [ ! -x "$KUBECTL" ]; then
+    echo "KUBECTL does not point to an executable: $KUBECTL" >&2
     exit 1
   fi
+elif command -v kubectl.exe >/dev/null 2>&1; then
+  KUBECTL="kubectl.exe"
+elif [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
+  KUBECTL="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
+elif [ -x "/mnt/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
+  KUBECTL="/mnt/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
+elif command -v kubectl >/dev/null 2>&1; then
+  KUBECTL="kubectl"
+else
+  echo "kubectl was not found. Add kubectl to PATH or set KUBECTL." >&2
+  exit 1
 fi
 
 echo "===================================="

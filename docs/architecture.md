@@ -54,7 +54,7 @@ sequenceDiagram
     participant Worker as Worker thread
     participant Domain as Reservation state
 
-    Client->>Queue: msgsnd(Message{mtype=1, clientId, command})
+    Client->>Queue: msgsnd(RequestMessage{mtype=1, clientId, command})
     Worker->>Queue: msgrcv(..., mtype=1)
     Worker->>Worker: Parse LIST / STATUS / RESERVE / CANCEL / QUIT
     Worker->>Domain: Execute command
@@ -64,22 +64,27 @@ sequenceDiagram
     else nosync mode
         Domain->>Domain: Read/update seats[20] without mutex
     end
-    Worker->>Queue: msgsnd(Message{mtype=1000+clientId, response})
+    Worker->>Queue: msgsnd(ResponseMessage{mtype=1000+clientId, response})
     Client->>Queue: msgrcv(..., mtype=1000+clientId)
 ```
 
 ## Message contract
 
 ```text
-struct Message {
+struct RequestMessage {
     long mtype;       // System V routing type
     int  clientId;    // response destination and reservation owner
     char command[128];
+};
+
+struct ResponseMessage {
+    long mtype;       // System V routing type
+    int  clientId;
     char response[2048];
 };
 ```
 
-Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allowing each client to read only its own response from the shared queue.
+Requests use `RequestMessage` with `mtype = 1`. Responses use `ResponseMessage` with `mtype = 1000 + clientId`, allowing each client to read only its own response from the shared queue. Separate payloads prevent unused response storage from filling the queue during concurrent load tests.
 
 ## Components and responsibilities
 
@@ -105,12 +110,13 @@ Requests use `mtype = 1`. A worker responds with `mtype = 1000 + clientId`, allo
 - Containers in the same Pod share IPC by default, so the manifests do not use `hostIPC: true`; this keeps the System V queue isolated from unrelated Pods on the node.
 - Every container mounts the same Pod-local `emptyDir` at `/ipc`, so `ftok` sees the same path metadata and all processes derive the same queue key.
 - The server supports `sync` or `nosync` plus a configurable worker count; the default is synchronized mode with 3 workers.
+- Multi-seat `RESERVE` and `CANCEL` commands pre-check every requested seat before changing state. A known conflict cancels the whole command in both modes; `nosync` still intentionally allows races between concurrent pre-check and update phases.
 - `k8s/pod-sequential.yaml` starts the server with `sync 1` for the sequential baseline experiment.
 - The manifest starts the server with `nosync 3`, so the default Kubernetes path is the unsynchronized branch for the race-condition demo.
 - `k8s/pod-sync.yaml` starts the same topology with `sync 3` for the synchronized experiment.
 - `client.cpp` and `server.cpp` implement the executable entrypoints, including queue creation/access and request/response handling.
-- `Dockerfile` copies `Makefile`, `src/`, and `scripts/` into the image before running `make`.
-- `Makefile` builds `server`, `client`, and `load_test`.
+- `Dockerfile` copies `Makefile`, `src/`, `scripts/`, and `tests/` into the image before running `make`.
+- `Makefile` builds `server`, `client`, `load_test`, and the unit test binary on demand.
 - `load_test` sends concurrent `STATUS`, `RESERVE`, or `CANCEL` requests and reports completion rate, operation results, throughput, and average latency.
 
 ## Key constants

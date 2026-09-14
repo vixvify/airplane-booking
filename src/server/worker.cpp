@@ -25,6 +25,11 @@ bool parseSeatIds(stringstream& ss, vector<int>& seatIds) {
     return ss.eof() && !seatIds.empty();
 }
 
+bool hasExtraArguments(stringstream& ss) {
+    string extra;
+    return static_cast<bool>(ss >> extra);
+}
+
 string processCommand(
     int workerId,
     int clientId,
@@ -39,6 +44,10 @@ string processCommand(
 
     if (action == "LIST") {
 
+        if (hasExtraArguments(ss)) {
+            return "Usage: LIST";
+        }
+
         return listSeats();
     }
 
@@ -46,7 +55,10 @@ string processCommand(
 
         int seatId;
 
-        if (!(ss >> seatId)) {
+        if (
+            !(ss >> seatId)
+            || hasExtraArguments(ss)
+        ) {
 
             return
                 "Usage: STATUS <seat_id>";
@@ -87,6 +99,10 @@ string processCommand(
 
     if (action == "QUIT") {
 
+        if (hasExtraArguments(ss)) {
+            return "Usage: QUIT";
+        }
+
         return "GOODBYE";
     }
 
@@ -101,12 +117,12 @@ void worker(
 
     while (true) {
 
-        Message request{};
+        RequestMessage request{};
 
         ssize_t received = msgrcv(
             messageQueueId,
             &request,
-            sizeof(Message)
+            sizeof(RequestMessage)
                 - sizeof(long),
             Constants::REQUEST_TYPE,
             0
@@ -143,7 +159,7 @@ void worker(
                 command
             );
 
-        Message response{};
+        ResponseMessage response{};
 
         response.mtype =
             Constants::RESPONSE_TYPE_BASE
@@ -166,7 +182,7 @@ void worker(
             msgsnd(
                 messageQueueId,
                 &response,
-                sizeof(Message)
+                sizeof(ResponseMessage)
                     - sizeof(long),
                 0
             ) == -1

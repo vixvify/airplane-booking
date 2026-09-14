@@ -134,7 +134,7 @@ docker exec -it airplane-reservation ./client 4
 docker exec -it airplane-reservation ./client 5
 ```
 
-แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id`
+แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id` โดย request และ response ใช้ payload struct แยกกัน เพื่อไม่ให้ request ที่ไม่ได้ใช้ response buffer เติม queue จนเต็มระหว่าง load test
 
 ### Concurrent test บน Docker
 
@@ -177,6 +177,8 @@ RESERVE <seat_id> [seat_id...]
 CANCEL <seat_id> [seat_id...]
 QUIT
 ```
+
+`RESERVE` และ `CANCEL` ที่ระบุหลาย seat เป็น transaction แบบ all-or-nothing: ถ้ามี seat ใดไม่ผ่านเงื่อนไข ระบบจะไม่เปลี่ยนสถานะ seat ใดในคำสั่งนั้น ทั้ง `sync` และ `nosync` ใช้กฎนี้เหมือนกัน แต่ `nosync` ยังจงใจไม่ป้องกัน race ระหว่าง concurrent requests
 
 ตัวอย่าง:
 
@@ -282,7 +284,40 @@ make
 
 จะได้ executable `server`, `client` และ `load_test` โดยใช้ source modules ใน `src/` โดย logic ตรวจเลข argument ที่ใช้ร่วมกันอยู่ใน `src/utils/cli_parser.cpp`
 
-## 12. Current limitations
+## 12. Tests
+
+Test suite อยู่ในโฟลเดอร์ `tests/` และแบ่งเป็น 3 ระดับ:
+
+| คำสั่ง | ขอบเขต |
+| --- | --- |
+| `make test-unit` | parser, seat validation, ownership, duplicate seats, multi-seat rollback, sync/nosync concurrency |
+| `make test-integration` | server/client ผ่าน System V queue จริง, ทุก client command, CLI errors, 3 experiment modes, load test, queue cleanup/recovery |
+| `make test-k8s` | smoke test manifests ทั้ง 3 แบบ, command lifecycle และ load test บน Kubernetes |
+
+รัน unit และ integration tests ทั้งหมดบน Linux:
+
+```bash
+make test
+```
+
+วิธีที่แนะนำบน Windows คือรันผ่าน Docker เพื่อให้ได้ Linux environment และ `/ipc` พร้อมใช้งาน:
+
+```bash
+docker build -t airplane-reservation:latest .
+docker run --rm airplane-reservation:latest make test
+```
+
+สำหรับ Kubernetes ให้ build image ก่อน เปิด Docker Desktop Kubernetes แล้วรันจาก Git Bash หรือ WSL:
+
+```bash
+make test-k8s
+```
+
+Kubernetes smoke test จะลบและสร้าง Pod `airplane-reservation` ใหม่หลายครั้งเพื่อแยก state ของแต่ละกรณี และลบ Pod เมื่อจบ หากต้องการเก็บ Pod สุดท้ายไว้ให้ใช้ `KEEP_TEST_POD=1 make test-k8s`
+
+กรณีที่ตรวจครอบคลุมประกอบด้วย LIST, STATUS, RESERVE, CANCEL, QUIT, malformed input, seat bounds, client ownership, duplicate seats, transaction rollback, sequential baseline, synchronized concurrency, unsynchronized race, fixed-seat/round-robin load และ stale queue recovery
+
+## 13. Current limitations
 
 - Reservation data อยู่ใน memory ของ server process เท่านั้น และจะ reset เมื่อ server restart
 - Queue lifecycle ถูกจัดการโดย System V kernel queue; ให้ใช้ container/Pod ใหม่เมื่อเปลี่ยน experiment เพื่อแยกผลการทดลอง
