@@ -1,129 +1,311 @@
-# Current Architecture
+# Architecture ของ Airplane Reservation System
 
-เอกสารนี้สรุป architecture จากโค้ดและ manifest ที่มีอยู่ใน repository ณ วันที่ 2026-09-10
+เอกสารนี้อธิบายโครงสร้างของระบบตาม implementation ปัจจุบัน โดยเริ่มจากภาพรวมก่อน แล้วค่อยลงรายละเอียดเรื่อง message queue, worker, synchronization, transaction และการรันบน Kubernetes
 
-## Overview
+## 1. ภาพรวมแบบสั้น
+
+ระบบแบ่งเป็น 3 ส่วนหลัก:
+
+1. `client` หรือ `load_test` สร้างคำสั่งและส่ง request
+2. System V message queue รับส่งข้อมูลระหว่าง process
+3. `server` มี worker threads หลายตัวคอยประมวลผล และใช้ข้อมูลที่นั่งชุดเดียวกันใน memory
 
 ```mermaid
 flowchart LR
-    subgraph Pod["Kubernetes Pod: airplane-reservation\nshared IPC within Pod"]
-        subgraph ServerContainer["server container\nairplane-reservation:latest"]
-            Server["./server [sync|nosync] [worker_count]\ncreates/opens queue"]
-            Workers["Worker threads\nDEFAULT_WORKER_COUNT = 3\nworker.cpp"]
-            Reservation["Reservation domain\nseats[20]\nLIST / STATUS / RESERVE / CANCEL"]
-            Sync["Per-seat mutexes\noptional synchronization"]
-            Logger["Logger\nsequence + worker/client id"]
-            Delay["Random delay\n50-500 ms"]
-        end
+    Client["Client processes\n./client <client_id>"]
+    LoadTest["Load test\n./load_test ..."]
+    Queue[("System V message queue\nrequest type = 1\nresponse type = 1000 + clientId")]
+    Workers["Worker pool\n1 หรือ 3 threads"]
+    Commands["Command parser\nLIST / STATUS / RESERVE / CANCEL / QUIT"]
+    Reservation["Reservation state\n20 seats in memory"]
+    Locks["20 per-seat mutexes\nใช้เฉพาะ sync mode"]
 
-        Queue[("System V message queue\nkey: ftok(/ipc, 'A')\nrequest mtype = 1\nresponse mtype = 1000 + clientId")]
-
-        C1["client-1\n./client 1"]
-        C2["client-2\n./client 2"]
-        C3["client-3\n./client 3"]
-        C4["client-4\n./client 4"]
-        C5["client-5\n./client 5"]
-    end
-
-    Server -->|set mode + spawn workers| Workers
-    C1 -->|msgsnd request| Queue
-    C2 -->|msgsnd request| Queue
-    C3 -->|msgsnd request| Queue
-    C4 -->|msgsnd request| Queue
-    C5 -->|msgsnd request| Queue
-    Queue -->|msgrcv request type 1| Workers
-    Workers -->|processCommand| Reservation
-    Reservation --> Sync
-    Reservation --> Delay
-    Workers --> Logger
-    Workers -->|msgsnd response| Queue
-    Queue -->|msgrcv type 1000 + clientId| C1
-    Queue -->|msgrcv type 1000 + clientId| C2
-    Queue -->|msgrcv type 1000 + clientId| C3
-    Queue -->|msgrcv type 1000 + clientId| C4
-    Queue -->|msgrcv type 1000 + clientId| C5
-
+    Client -->|RequestMessage| Queue
+    LoadTest -->|RequestMessage| Queue
+    Queue -->|request| Workers
+    Workers --> Commands
+    Commands --> Reservation
+    Reservation -. sync mode .-> Locks
+    Workers -->|ResponseMessage| Queue
+    Queue -->|response| Client
+    Queue -->|response| LoadTest
 ```
 
-## Request flow
+ข้อมูลที่นั่งไม่ได้อยู่ใน database และไม่ถูกเขียนลงไฟล์ เมื่อ server หรือ Pod หยุด ข้อมูลทั้งหมดจะหายไป
+
+## 2. Runtime topology บน Kubernetes
+
+manifest ทั้ง 3 ไฟล์สร้าง Pod ชื่อ `airplane-reservation` ที่มี 6 containers:
+
+- 1 server container รัน `./server <mode> <worker_count>`
+- 5 client containers รัน `sleep infinity` เพื่อรอให้เรียก `client` หรือ `load_test` ผ่าน `kubectl exec`
+
+ทุก container ใช้ image `airplane-reservation:latest` ชุดเดียวกัน
+
+```mermaid
+flowchart TB
+    subgraph Pod["Pod: airplane-reservation"]
+        subgraph ServerContainer["server container"]
+            Server["server process"]
+            WorkerPool["worker threads"]
+            SeatState["seats[20] + seatMutexes[20]"]
+            Server --> WorkerPool --> SeatState
+        end
+
+        subgraph ClientContainers["5 client containers"]
+            C1["client-1"]
+            C2["client-2"]
+            C3["client-3"]
+            C4["client-4"]
+            C5["client-5"]
+        end
+
+        Queue[("System V message queue")]
+        SharedPath["emptyDir mounted at /ipc"]
+
+        C1 <--> Queue
+        C2 <--> Queue
+        C3 <--> Queue
+        C4 <--> Queue
+        C5 <--> Queue
+        Queue <--> WorkerPool
+        SharedPath -. same ftok path .-> Server
+        SharedPath -. same ftok path .-> ClientContainers
+    end
+```
+
+`/ipc` เป็น `emptyDir` ภายใน Pod และถูก mount เข้าไปในทุก container ทำให้ทุก process เรียก `ftok("/ipc", 'A')` แล้วหา queue เดียวกันได้ ระบบไม่ใช้ `hostIPC: true` จึงไม่เปิด IPC namespace ของ host ให้ Pod และ queue ไม่ไปรวมกับ Pod อื่นบน node
+
+## 3. Request และ response เดินทางอย่างไร
+
+client หนึ่งตัวจะส่งทีละคำสั่ง แล้วรอ response ของคำสั่งนั้นก่อนอ่านคำสั่งถัดไป
 
 ```mermaid
 sequenceDiagram
     participant Client as Client process
-    participant Queue as System V message queue
-    participant Worker as Worker thread
+    participant Queue as System V queue
+    participant Worker as Available worker
     participant Domain as Reservation state
 
-    Client->>Queue: msgsnd(RequestMessage{mtype=1, clientId, command})
-    Worker->>Queue: msgrcv(..., mtype=1)
-    Worker->>Worker: Parse LIST / STATUS / RESERVE / CANCEL / QUIT
-    Worker->>Domain: Execute command
-    alt synchronization enabled
-        Domain->>Domain: Lock affected seat mutex(es)
-        Domain->>Domain: Read/update seats[20]
-    else nosync mode
-        Domain->>Domain: Read/update seats[20] without mutex
-    end
-    Worker->>Queue: msgsnd(ResponseMessage{mtype=1000+clientId, response})
-    Client->>Queue: msgrcv(..., mtype=1000+clientId)
+    Client->>Queue: msgsnd RequestMessage (mtype = 1)
+    Worker->>Queue: msgrcv request type 1
+    Worker->>Worker: parse and validate command
+    Worker->>Domain: execute operation
+    Domain-->>Worker: result text
+    Worker->>Queue: msgsnd ResponseMessage (mtype = 1000 + clientId)
+    Client->>Queue: msgrcv its response type
+    Queue-->>Client: response text
 ```
 
-## Message contract
+worker ทุกตัวรออ่าน request type `1` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน response ใช้ type ที่คำนวณจาก client ID ทำให้ client อ่านเฉพาะคำตอบของตัวเอง
 
-```text
+### Message contract
+
+```cpp
 struct RequestMessage {
-    long mtype;       // System V routing type
-    int  clientId;    // response destination and reservation owner
+    long mtype;
+    int clientId;
     char command[128];
 };
 
 struct ResponseMessage {
-    long mtype;       // System V routing type
-    int  clientId;
+    long mtype;
+    int clientId;
     char response[2048];
 };
 ```
 
-Requests use `RequestMessage` with `mtype = 1`. Responses use `ResponseMessage` with `mtype = 1000 + clientId`, allowing each client to read only its own response from the shared queue. Separate payloads prevent unused response storage from filling the queue during concurrent load tests.
+request และ response ใช้คนละ struct เพราะ request ต้องเก็บเพียงคำสั่งสั้น ๆ การไม่ใส่ buffer response ขนาดใหญ่ไว้ใน request ช่วยลดขนาด message และลดโอกาสที่ queue จะเต็มเมื่อยิง load test พร้อมกันจำนวนมาก
 
-## Components and responsibilities
+## 4. Server และ worker pool
 
-| Component | Responsibility | Source |
+เมื่อ server เริ่มทำงาน จะทำตามลำดับนี้:
+
+1. อ่าน mode (`sync` หรือ `nosync`) และจำนวน worker
+2. ตั้งค่า synchronization ให้ reservation module
+3. สร้าง key ด้วย `ftok("/ipc", 'A')`
+4. ลบ queue เก่าที่ค้างจาก server รอบก่อน ถ้ามี
+5. สร้าง queue ใหม่
+6. สร้าง worker threads ตามจำนวนที่กำหนด
+7. worker แต่ละตัววนรอ request จาก queue
+
+เมื่อ server ได้รับ `SIGINT` หรือ `SIGTERM` จะลบ message queue ก่อนปิด process ส่วน worker จะออกจาก loop เมื่อ queue ถูกลบและ `msgrcv` คืน `EIDRM` หรือ `EINVAL`
+
+จำนวน worker มีผลต่อ concurrency โดยตรง:
+
+- 1 worker: ทำคำสั่งทีละรายการ แม้ clients จะส่งพร้อมกัน
+- มากกว่า 1 worker: หลายคำสั่งเข้าถึง reservation state พร้อมกันได้
+
+## 5. ข้อมูลที่นั่งและคำสั่ง
+
+ข้อมูลหลักคือ array ขนาด 20 ช่อง:
+
+```text
+seats[index] = 0          หมายถึงที่นั่งว่าง
+seats[index] = clientId   หมายถึง client นั้นเป็นเจ้าของที่นั่ง
+```
+
+seat ID ที่ผู้ใช้เห็นอยู่ในช่วง `1-20` ส่วน index ภายใน array อยู่ในช่วง `0-19`
+
+| คำสั่ง | การทำงาน | เงื่อนไขสำคัญ |
 | --- | --- | --- |
-| `server` | Creates/opens the queue, configures sync mode, and spawns the worker pool | `src/server/server.cpp`, `k8s/pod-sequential.yaml`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
-| Worker pool | Consumes request messages, dispatches commands, sends responses | `src/server/worker.cpp` |
-| Reservation domain | In-memory seat state, validation, reserve/cancel/status/list operations | `src/reservation/reservation.cpp` |
-| Synchronization | One `std::mutex` per seat when enabled | `src/reservation/reservation.cpp` |
-| Message contract | Fixed-size request/response payload and message types | `src/models/message.h`, `src/constants/constants.h` |
-| Logger | Serialized console logs with sequence number | `src/utils/logger.cpp` |
-| Delay | Simulates 50–500 ms operation delay | `src/utils/delay.cpp` |
-| CLI parser | Validates positive integer arguments shared by server and client | `src/utils/cli_parser.cpp` |
-| Clients | Command-line clients that send commands and wait for per-client responses; five Kubernetes containers are provisioned | `src/client/client.cpp`, `k8s/pod-sequential.yaml`, `k8s/pod.yaml`, `k8s/pod-sync.yaml` |
-| Load test | Concurrently sends `STATUS`, `RESERVE`, or `CANCEL` requests and measures completion, operation results, throughput, and latency | `src/load_test/load_test.cpp` |
+| `LIST` | แสดงสถานะครบ 20 ที่นั่ง | ไม่รับ argument |
+| `STATUS <seat>` | แสดงสถานะหนึ่งที่นั่ง | ต้องมี seat ID เพียงตัวเดียว |
+| `RESERVE <seat...>` | จองหนึ่งหรือหลายที่นั่ง | ทุกที่นั่งต้อง valid และว่าง |
+| `CANCEL <seat...>` | ยกเลิกหนึ่งหรือหลายที่นั่ง | ทุกที่นั่งต้องเป็นของ client ที่ส่งคำสั่ง |
+| `QUIT` | ส่ง `GOODBYE` แล้ว client จบการทำงาน | ไม่รับ argument |
 
-## Current-state notes
+เลขที่นั่งซ้ำใน `RESERVE` หรือ `CANCEL` จะถูก sort และตัดค่าซ้ำก่อนประมวลผล เช่น `RESERVE 3 1 3` จะทำงานกับที่นั่ง `1` และ `3`
 
-- Seat state is in the server process memory (`seats[20]`); there is no database or persistent storage.
-- All workers in the server process share the same seat array and per-seat mutexes.
-- Clients communicate through the same System V queue. Responses are routed by `1000 + clientId`.
-- The Kubernetes manifests create one Pod with one server container and five client containers; client containers wait for a manual `kubectl exec` command.
-- Containers in the same Pod share IPC by default, so the manifests do not use `hostIPC: true`; this keeps the System V queue isolated from unrelated Pods on the node.
-- Every container mounts the same Pod-local `emptyDir` at `/ipc`, so `ftok` sees the same path metadata and all processes derive the same queue key.
-- The server supports `sync` or `nosync` plus a configurable worker count; the default is synchronized mode with 3 workers.
-- Multi-seat `RESERVE` and `CANCEL` commands pre-check every requested seat before changing state. A known conflict cancels the whole command in both modes; `nosync` still intentionally allows races between concurrent pre-check and update phases.
-- `k8s/pod-sequential.yaml` starts the server with `sync 1` for the sequential baseline experiment.
-- The manifest starts the server with `nosync 3`, so the default Kubernetes path is the unsynchronized branch for the race-condition demo.
-- `k8s/pod-sync.yaml` starts the same topology with `sync 3` for the synchronized experiment.
-- `client.cpp` and `server.cpp` implement the executable entrypoints, including queue creation/access and request/response handling.
-- `Dockerfile` copies `Makefile`, `src/`, `scripts/`, and `tests/` into the image before running `make`.
-- `Makefile` builds `server`, `client`, `load_test`, and the unit test binary on demand.
-- `load_test` sends concurrent `STATUS`, `RESERVE`, or `CANCEL` requests and reports completion rate, operation results, throughput, and average latency.
+## 6. Multi-seat transaction
 
-## Key constants
+`RESERVE` และ `CANCEL` รองรับหลายที่นั่งในคำสั่งเดียว และใช้แนวคิด all-or-nothing สำหรับ conflict ที่ตรวจพบ:
 
-- 20 seats
-- 3 default worker threads
-- Request message type `1`
-- Response message type `1000 + clientId`
-- Queue key source `/ipc` with project id `'A'`; Kubernetes mounts `/ipc` as a shared Pod-local `emptyDir`
-- Simulated delay between 50 and 500 ms
+```mermaid
+flowchart TD
+    Start["Receive RESERVE or CANCEL"]
+    Normalize["Sort and remove duplicate seat IDs"]
+    Validate{"Every seat ID is valid?"}
+    Mode{"sync mode?"}
+    Lock["Lock every affected seat\nin ascending order"]
+    SyncPrecheck{"Every seat passes\nthe operation condition?"}
+    NosyncPrecheck{"Every seat passes\nthe operation condition?"}
+    SyncUpdate["Update every requested seat\nwhile holding all locks"]
+    Delay["Random delay\nwithout locks"]
+    NosyncUpdate["Update every requested seat"]
+    Unlock["Release locks"]
+    Success["Return SUCCESS for all seats"]
+    Error["Return ERROR\nchange nothing"]
+    Failed["Return FAILED\nchange nothing"]
+
+    Start --> Normalize --> Validate
+    Validate -- no --> Error
+    Validate -- yes --> Mode
+    Mode -- yes --> Lock --> SyncPrecheck
+    SyncPrecheck -- no --> Failed
+    SyncPrecheck -- yes --> SyncUpdate --> Unlock --> Success
+    Mode -- no --> NosyncPrecheck
+    NosyncPrecheck -- no --> Failed
+    NosyncPrecheck -- yes --> Delay --> NosyncUpdate --> Success
+```
+
+ตัวอย่าง: ถ้า Client-1 ส่ง `RESERVE 4 5 6` แต่ที่นั่ง 5 ถูกจองอยู่แล้ว ระบบจะไม่จอง 4 และ 6 ให้บางส่วน แต่จะยกเลิกทั้งคำสั่ง
+
+การ lock ตามลำดับ seat ID จากน้อยไปมากทำให้ transaction ที่ขอหลายที่นั่งใช้ลำดับ lock เหมือนกัน และหลีกเลี่ยง deadlock จากการถือ mutex ไขว้กัน
+
+## 7. ความต่างระหว่าง sync และ nosync
+
+| ประเด็น | `sync` | `nosync` |
+| --- | --- | --- |
+| การเข้าถึง seat state | ใช้ mutex แยกต่อที่นั่ง | ไม่ใช้ mutex |
+| Check และ update | อยู่ภายใต้ locks ชุดเดียวกัน | มี random delay คั่นระหว่าง check กับ update |
+| เมื่อหลาย worker จองที่เดียวกัน | สำเร็จได้เพียงหนึ่ง request | หลาย request อาจคิดว่าสำเร็จพร้อมกัน |
+| Multi-seat conflict ที่มีอยู่ก่อน | ยกเลิกทั้งคำสั่ง | ยกเลิกทั้งคำสั่ง |
+| Atomic เมื่อมี concurrent request | ใช่ สำหรับที่นั่งที่ lock | ไม่ใช่ |
+| จุดประสงค์ | แสดงการแก้ race condition | แสดงผลของ race condition |
+
+จุดสำคัญคือ `nosync` ทำ pre-check ครบทุกที่นั่งก่อน update จึงไม่เกิด partial update เมื่อพบ conflict ที่มีอยู่แล้ว แต่ไม่สามารถรับประกัน atomicity ระหว่าง concurrent requests ได้ เพราะ state อาจเปลี่ยนหลัง pre-check และก่อน update
+
+```mermaid
+sequenceDiagram
+    participant A as Worker A / Client-1
+    participant State as Seat 10
+    participant B as Worker B / Client-2
+
+    A->>State: check: AVAILABLE
+    B->>State: check: AVAILABLE
+    Note over A,B: random delay; no mutex in nosync mode
+    A->>State: set owner = Client-1
+    B->>State: set owner = Client-2
+    Note over A,B: both requests may report SUCCESS; last write remains in memory
+```
+
+ใน `sync` worker ตัวแรกจะถือ mutex ของ Seat 10 ตั้งแต่ check จน update เสร็จ Worker อีกตัวจึงต้องรอ และจะพบว่าที่นั่งไม่ว่างหลังได้ lock
+
+## 8. การทดลองทั้ง 3 แบบ
+
+topology ของทั้ง 3 experiments เหมือนกันทั้งหมด ต่างกันเฉพาะ argument ของ server:
+
+| Experiment | Manifest | Server configuration | สิ่งที่ต้องสังเกต |
+| --- | --- | --- | --- |
+| 1. Sequential baseline | `k8s/pod-sequential.yaml` | `sync 1` | ทุก request ทำทีละรายการ จึงไม่มีการชนกันระหว่าง workers |
+| 2. Concurrent without synchronization | `k8s/pod.yaml` | `nosync 3` | มี 3 workers และไม่มี mutex จึงสามารถเห็น race condition |
+| 3. Concurrent with synchronization | `k8s/pod-sync.yaml` | `sync 3` | มี 3 workers แต่ mutex ทำให้การจองที่นั่งเดียวกันสำเร็จเพียงหนึ่ง request |
+
+`scripts/concurrent-test.sh` ส่ง `RESERVE 10` จาก client 1-5 พร้อมกัน เพื่อใช้ workload เดียวกันเปรียบเทียบทั้ง 3 configurations พร้อมทั้งแสดง client responses และ live server logs แยก prefix ให้ดูง่าย
+
+## 9. Load test
+
+`load_test` ใช้ message queue ชุดเดียวกับ client ปกติ แต่สร้าง threads เป็น batch ตามค่า concurrency แต่ละ request ใช้ client ID แยกกัน (`10000 + requestNumber`) จึงรับ response ของตัวเองได้
+
+รองรับ operations ต่อไปนี้:
+
+- `STATUS`
+- `RESERVE`
+- `CANCEL`
+
+ถ้าไม่ระบุ seat ID ระบบจะวนเลือกที่นั่ง 1-20 แบบ round-robin ถ้าระบุ seat ID ทุก request จะยิงไปที่ที่นั่งเดียวกันเพื่อสร้าง contention
+
+ผลลัพธ์ที่รายงานประกอบด้วย completed requests, transport failures, operation successes/failures, completion rate, throughput และ average latency
+
+## 10. Logs และผลลัพธ์ของ client
+
+ข้อมูลสองส่วนนี้มาจากคนละ stream:
+
+- server logs แสดงลำดับเหตุการณ์ภายใน worker เช่น check, wait for lock, lock, update และออกจาก critical section
+- client output คือ response ที่ worker ส่งกลับผ่าน message queue
+
+logger ใช้ mutex ของตัวเองเพื่อไม่ให้ข้อความจากหลาย workers เขียนทับกัน และใส่ sequence number, worker ID และ client ID ในแต่ละบรรทัด:
+
+```text
+[SEQ 12] [Worker-2] [Client-4] locked Seat 10
+```
+
+sequence number บอกลำดับที่ log ถูกพิมพ์ ไม่ได้หมายความว่าทุก operation ทำงานแบบ sequential
+
+## 11. Tests และสิ่งที่แต่ละระดับตรวจ
+
+| ระดับ | ไฟล์/คำสั่ง | ขอบเขต |
+| --- | --- | --- |
+| Unit | `tests/unit_tests.cpp`, `make test-unit` | parser, validation, ownership, duplicate seats, rollback และ concurrency ของ reservation module |
+| Integration | `tests/integration_tests.sh`, `make test-integration` | executable จริง, System V queue, commands, queue lifecycle, ทั้ง 3 modes และ load test |
+| Kubernetes smoke | `tests/k8s_smoke_tests.sh`, `make test-k8s` | manifests ทั้ง 3 แบบ, command lifecycle และ load test ภายใน Pod |
+
+`make test` รัน unit และ integration tests ส่วน Kubernetes test แยกเป็น `make test-k8s` เพราะต้องมี Docker Desktop Kubernetes และ image `airplane-reservation:latest` อยู่ก่อน
+
+## 12. Component map
+
+| Component | หน้าที่ | Source |
+| --- | --- | --- |
+| Server entrypoint | ตั้ง mode, จัดการ queue lifecycle และสร้าง workers | `src/server/server.cpp` |
+| Worker | รับ request, parse command และส่ง response | `src/server/worker.cpp` |
+| Reservation | เก็บ seat state และทำ LIST/STATUS/RESERVE/CANCEL | `src/reservation/reservation.cpp` |
+| Client | อ่านคำสั่งจาก stdin และรอ response ของตัวเอง | `src/client/client.cpp` |
+| Load test | สร้าง concurrent requests และวัดผล | `src/load_test/load_test.cpp` |
+| Message model | กำหนด request/response payload | `src/models/message.h` |
+| Constants | จำนวนที่นั่ง, message types, queue key และ delay | `src/constants/constants.h` |
+| CLI parser | ตรวจ positive integer arguments | `src/utils/cli_parser.cpp` |
+| Logger | serialize logs และสร้าง sequence number | `src/utils/logger.cpp` |
+| Delay | สุ่ม delay 50-500 ms เพื่อขยาย race window | `src/utils/delay.cpp` |
+| Kubernetes manifests | กำหนด Pod topology และ experiment mode | `k8s/` |
+
+## 13. ค่าคงที่สำคัญ
+
+| ค่า | ปัจจุบัน |
+| --- | --- |
+| จำนวนที่นั่ง | 20 |
+| จำนวน worker เริ่มต้น | 3 |
+| Request message type | `1` |
+| Response message type | `1000 + clientId` |
+| Queue key | `ftok("/ipc", 'A')` |
+| Random delay | 50-500 ms |
+| สถานะว่างภายใน array | `0` |
+
+## 14. ข้อจำกัดของ architecture ปัจจุบัน
+
+- มี server process และ Pod เดียว ไม่มี replication หรือ failover
+- seat state อยู่ใน memory จึงไม่ทนต่อการ restart
+- System V message queue เป็น IPC ภายในเครื่อง/Pod ไม่ใช่ network service
+- client ID เป็นตัวเลขที่ผู้เรียกกำหนดเอง ไม่มี authentication
+- `nosync` จงใจไม่ปลอดภัยต่อ concurrent updates และใช้เพื่อการทดลองเท่านั้น
+- response มีขนาดคงที่ 2048 bytes จึงเหมาะกับจำนวนที่นั่งปัจจุบัน แต่ไม่ได้ออกแบบไว้สำหรับข้อมูลขนาดใหญ่
