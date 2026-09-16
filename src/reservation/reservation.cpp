@@ -11,21 +11,81 @@
 
 using namespace std;
 
+namespace {
+
 int seats[Constants::SEAT_COUNT] = {0};
 
 mutex seatMutexes[Constants::SEAT_COUNT];
 
 bool synchronizationEnabled = true;
 
-void setSynchronization(bool enabled) {
-
-    synchronizationEnabled = enabled;
-}
-
 bool isValidSeat(int seatId) {
 
     return seatId >= 1
         && seatId <= Constants::SEAT_COUNT;
+}
+
+bool validateAndNormalizeSeats(
+    const vector<int>& requestedSeats,
+    vector<int>& normalizedSeats,
+    string& errorMessage
+) {
+    if (requestedSeats.empty()) {
+        errorMessage = "ERROR: No seats specified";
+        return false;
+    }
+
+    normalizedSeats = requestedSeats;
+    sort(normalizedSeats.begin(), normalizedSeats.end());
+    normalizedSeats.erase(
+        unique(normalizedSeats.begin(), normalizedSeats.end()),
+        normalizedSeats.end()
+    );
+
+    for (int seatId : normalizedSeats) {
+        if (!isValidSeat(seatId)) {
+            errorMessage = "ERROR: Invalid seat " + to_string(seatId);
+            return false;
+        }
+    }
+
+    return true;
+}
+
+vector<unique_lock<mutex>> acquireLocksInOrder(
+    int workerId,
+    int clientId,
+    const vector<int>& seatIds
+) {
+    vector<unique_lock<mutex>> locks;
+    locks.reserve(seatIds.size());
+
+    for (int seatId : seatIds) {
+        int index = seatId - 1;
+
+        logMessage(
+            workerId,
+            clientId,
+            "waiting for Seat " + to_string(seatId)
+        );
+
+        locks.emplace_back(seatMutexes[index]);
+
+        logMessage(
+            workerId,
+            clientId,
+            "locked Seat " + to_string(seatId)
+        );
+    }
+
+    return locks;
+}
+
+}
+
+void setSynchronization(bool enabled) {
+
+    synchronizationEnabled = enabled;
 }
 
 string listSeats() {
@@ -145,36 +205,11 @@ string reserveSeats(
     const vector<int>& requestedSeats
 ) {
 
-    if (requestedSeats.empty()) {
+    vector<int> seatIds;
+    string errorMessage;
 
-        return
-            "ERROR: No seats specified";
-    }
-
-    vector<int> seatIds =
-        requestedSeats;
-
-    sort(
-        seatIds.begin(),
-        seatIds.end()
-    );
-
-    seatIds.erase(
-        unique(
-            seatIds.begin(),
-            seatIds.end()
-        ),
-        seatIds.end()
-    );
-
-    for (int seatId : seatIds) {
-
-        if (!isValidSeat(seatId)) {
-
-            return
-                "ERROR: Invalid seat "
-                + to_string(seatId);
-        }
+    if (!validateAndNormalizeSeats(requestedSeats, seatIds, errorMessage)) {
+        return errorMessage;
     }
 
     if (!synchronizationEnabled) {
@@ -241,30 +276,7 @@ string reserveSeats(
         return result.str();
     }
 
-    vector<unique_lock<mutex>> locks;
-
-    for (int seatId : seatIds) {
-
-        int index = seatId - 1;
-
-        logMessage(
-            workerId,
-            clientId,
-            "waiting for Seat "
-            + to_string(seatId)
-        );
-
-        locks.emplace_back(
-            seatMutexes[index]
-        );
-
-        logMessage(
-            workerId,
-            clientId,
-            "locked Seat "
-            + to_string(seatId)
-        );
-    }
+    auto locks = acquireLocksInOrder(workerId, clientId, seatIds);
 
     logMessage(
         workerId,
@@ -342,33 +354,11 @@ string cancelSeats(
     const vector<int>& requestedSeats
 ) {
 
-    if (requestedSeats.empty()) {
-        return "ERROR: No seats specified";
-    }
+    vector<int> seatIds;
+    string errorMessage;
 
-    vector<int> seatIds = requestedSeats;
-
-    sort(
-        seatIds.begin(),
-        seatIds.end()
-    );
-
-    seatIds.erase(
-        unique(
-            seatIds.begin(),
-            seatIds.end()
-        ),
-        seatIds.end()
-    );
-
-    for (int seatId : seatIds) {
-
-        if (!isValidSeat(seatId)) {
-
-            return
-                "ERROR: Invalid seat "
-                + to_string(seatId);
-        }
+    if (!validateAndNormalizeSeats(requestedSeats, seatIds, errorMessage)) {
+        return errorMessage;
     }
 
     if (!synchronizationEnabled) {
@@ -447,30 +437,7 @@ string cancelSeats(
         return result.str();
     }
 
-    vector<unique_lock<mutex>> locks;
-
-    for (int seatId : seatIds) {
-
-        int index = seatId - 1;
-
-        logMessage(
-            workerId,
-            clientId,
-            "waiting for Seat "
-            + to_string(seatId)
-        );
-
-        locks.emplace_back(
-            seatMutexes[index]
-        );
-
-        logMessage(
-            workerId,
-            clientId,
-            "locked Seat "
-            + to_string(seatId)
-        );
-    }
+    auto locks = acquireLocksInOrder(workerId, clientId, seatIds);
 
     logMessage(
         workerId,
@@ -505,8 +472,6 @@ string cancelSeats(
     for (int seatId : seatIds) {
 
         int index = seatId - 1;
-
-        randomDelay();
 
         seats[index] =
             Constants::AVAILABLE;
