@@ -66,8 +66,14 @@ int main(int argc, char* argv[]) {
 
     if (
         argc == 3
-        && !parsePositiveInt(argv[2], workerCount)
+        && (
+            !parsePositiveInt(argv[2], workerCount)
+            || workerCount > Constants::MAX_WORKER_COUNT
+        )
     ) {
+        cerr
+            << "Error: worker_count must be between 1 and "
+            << Constants::MAX_WORKER_COUNT << "\n";
         printUsage(argv[0]);
         return 1;
     }
