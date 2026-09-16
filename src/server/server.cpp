@@ -66,8 +66,12 @@ int main(int argc, char* argv[]) {
 
     if (
         argc == 3
-        && !parsePositiveInt(argv[2], workerCount)
+        && (
+            !parsePositiveInt(argv[2], workerCount)
+            || workerCount > 64
+        )
     ) {
+        cerr << "Error: worker_count must be between 1 and 64\n";
         printUsage(argv[0]);
         return 1;
     }
