@@ -73,7 +73,7 @@ kubectl logs airplane-reservation -c server --tail=100
 
 `concurrent-test.sh` ยิง `RESERVE 10` จาก client ทั้ง 5 ตัวพร้อมกัน จึงไม่ต้องเปิด terminal client แยกเอง
 
-ระหว่างที่ script ทำงาน จะเปิด server logs แบบ live ใน terminal เดียวกันทันที โดย Kubernetes จะเติม prefix `[pod/airplane-reservation/server]` ให้ log ฝั่ง server และ script จะเติม `[CLIENT-N]` ให้ผลลัพธ์ของแต่ละ client ส่วนคำสั่ง `kubectl logs ... --tail=100` ที่อยู่ท้ายแต่ละตัวอย่างใช้ดู log ย้อนหลังหลังจบการทดสอบ
+ระหว่างที่ script ทำงาน จะเปิด server logs แบบ live ใน terminal เดียวกันทันที โดย script จะเติม prefix `[SERVER]` ให้ log ฝั่ง server และ script จะเติม `[CLIENT-N]` ให้ผลลัพธ์ของแต่ละ client ส่วนคำสั่ง `kubectl logs ... --tail=100` ที่อยู่ท้ายแต่ละตัวอย่างใช้ดู log ย้อนหลังหลังจบการทดสอบ
 
 `kubectl wait` แค่รอให้ server และ client containers พร้อม ไม่ได้สร้าง Pod เอง
 
@@ -84,6 +84,37 @@ kubectl delete pod airplane-reservation
 ```
 
 Containers ใน Pod เดียวกันแชร์ IPC namespace กันโดยปริยาย จึงไม่จำเป็นต้องใช้ `hostIPC: true` และทุก container mount โฟลเดอร์ร่วม `/ipc` ผ่าน `emptyDir` เพื่อให้ `ftok` สร้าง queue key เดียวกัน โดย queue จะไม่ปะปนกับ Pod อื่นบน node เดียวกัน
+
+### Demo 1: หลาย client ส่งหลายคำสั่ง
+
+Demo 1 นี้เป็นการสาธิตคำสั่งปกติตาม requirement ไม่ใช่ชื่อใหม่ของ Experiment 1 (sequential baseline)
+
+เริ่ม Pod แบบ sync 3 ใหม่ก่อน เพื่อให้ที่นั่ง 1–5 ว่าง แล้วรัน:
+
+```bash
+kubectl delete pod airplane-reservation --ignore-not-found
+kubectl apply -f k8s/pod-sync.yaml
+kubectl wait --for=condition=Ready pod/airplane-reservation --timeout=60s
+bash scripts/demo1.sh
+```
+
+script เริ่ม client 1–5 พร้อมกัน แต่ละ client ส่งชุดคำสั่งต่างกันที่ครอบคลุม `LIST`, `STATUS`, `RESERVE`, `CANCEL`, `QUIT` โดยจองที่นั่งของตัวเองแล้วให้ client เดิมยกเลิก ทุก client ต้องจองและยกเลิกสำเร็จ หากที่นั่งไม่ว่างตั้งแต่แรก script จะหยุดก่อนเริ่ม demo ไม่ลบ reservation ของผู้อื่น
+
+ส่วน Demo 2 (race) ใช้ Experiment 2 และ Demo 3 (แก้ race) ใช้ Experiment 3 ด้านบน
+
+### ไฟล์หลักฐานของแต่ละรอบ
+
+ทั้ง `demo1.sh` และ `concurrent-test.sh` แสดง live logs และสร้างโฟลเดอร์ใหม่ใน `results/` ทุกครั้ง:
+
+- `summary.txt`: ประเภท demo, เวลาเริ่ม/จบ, runtime และ exit code
+- `client-N-commands.txt`: คำสั่งที่ส่ง
+- `client-N.txt`: คำตอบของ client แยกคนละไฟล์
+- `server-live.txt`: log ที่ได้รับระหว่างรัน
+- `server.txt`: log ตั้งแต่เริ่ม script ที่ดึงซ้ำเมื่อจบ เพื่อเก็บบรรทัดท้ายให้ครบ
+
+ไฟล์เก่าไม่ถูกเขียนทับ และ `results/` ไม่ถูก commit อัตโนมัติ สำเนาโฟลเดอร์ที่ต้องการแนบรายงานได้เลย การพิมพ์ข้อความ “finished” หมายถึงส่ง/รับและเก็บผลสำเร็จ; ใน concurrent test การจองแพ้เป็นผลที่คาดไว้ ต้องนับผู้ชนะเปรียบเทียบแต่ละโหมดด้วย
+
+หากใช้ Windows ให้เปิด **Git Bash** แล้วรัน script ใน root ของโปรเจกต์ การมี WSL อย่างเดียวไม่ได้ยืนยันว่ามี Linux distribution ที่มี `/bin/bash`; error `CreateProcessCommon ... /bin/bash` เกิดก่อน script เริ่มทำงาน
 
 ## 4. ทดสอบ client แบบ manual
 
@@ -134,7 +165,7 @@ docker exec -it airplane-reservation ./client 4
 docker exec -it airplane-reservation ./client 5
 ```
 
-แต่ละ client รับคำสั่งจาก stdin และรอ response ของตัวเองผ่าน response message type ที่คำนวณจาก `1000 + client_id` โดย request และ response ใช้ payload struct แยกกัน เพื่อไม่ให้ request ที่ไม่ได้ใช้ response buffer เติม queue จนเต็มระหว่าง load test
+แต่ละ client รับคำสั่งจาก stdin และรอ response ผ่าน reply queue ส่วนตัวของคำสั่งนั้น โดย request queue ใช้ร่วมกัน แต่ worker ส่งคำตอบกลับไปที่ `replyQueueId` ที่ระบุใน request จึงไม่แย่งพื้นที่กับ request และไม่รับคำตอบสลับกันแม้ client ID ซ้ำ
 
 ### Concurrent test บน Docker
 
@@ -168,6 +199,25 @@ $jobs | Remove-Job
 
 คำสั่งชุดนี้เทียบเท่ากับ `scripts/concurrent-test.sh` แต่ใช้ `docker exec` แทน `kubectl exec` และจึงใช้ได้กับ Docker standalone เท่านั้น
 
+### ใช้ demo script กับ Docker โดยตรง
+
+หากต้องการให้ script เก็บ server logs ด้วย ให้ server เป็น process หลักของ container (ต่างจากตัวอย่าง `sleep infinity` + `docker exec` ด้านบน):
+
+```bash
+docker run -d --name reservation-demo airplane-reservation:latest ./server sync 3
+RUNTIME=docker CONTAINER_NAME=reservation-demo bash scripts/demo1.sh
+RUNTIME=docker CONTAINER_NAME=reservation-demo bash scripts/concurrent-test.sh
+```
+
+เมื่อเปลี่ยน experiment ให้หยุดและลบ container ทดลองนี้ แล้วสร้างใหม่ด้วย `sync 1`, `nosync 3` หรือ `sync 3` เพื่อ reset ที่นั่ง:
+
+```bash
+docker stop reservation-demo
+docker rm reservation-demo
+```
+
+บน Linux ที่รัน binary โดยตรง ให้ terminal แรกใช้ `./server sync 3 > server.txt 2>&1` แล้ว terminal อีกอันใช้ `RUNTIME=local SERVER_LOG=server.txt bash scripts/demo1.sh` (ต้องมี `/ipc` และสิทธิ์เขียน)
+
 ## 6. Commands ใน client
 
 ```text
@@ -189,6 +239,8 @@ CANCEL 10
 QUIT
 ```
 
+คำสั่งยาวได้ไม่เกิน 127 bytes (ไม่รวม newline); ยาวเกินหรือมี NUL จะถูกปฏิเสธทั้งคำสั่ง ไม่ตัดข้อความแล้วนำไปรัน เลข overflow ถูกปฏิเสธก่อนเปลี่ยนข้อมูล และ `QUIT extra` จะแสดง usage โดยยังรับคำสั่งถัดไป
+
 ## 7. Server options
 
 ```text
@@ -197,9 +249,9 @@ QUIT
 
 - `sync` เปิด per-seat mutex (ค่าเริ่มต้น)
 - `nosync` ปิด mutex เพื่อสาธิต race condition
-- `worker_count` ต้องมากกว่า 0 และค่าเริ่มต้นคือ 3
+- `worker_count` อยู่ระหว่าง 1–64 และค่าเริ่มต้นคือ 3
 
-Server ใช้ queue ที่สร้างจาก `ftok("/ipc", 'A')` และใช้ request message type `1` ส่วน response ใช้ `1000 + client_id`
+Server ใช้ request queue ที่สร้างจาก `ftok("/ipc", 'A')` และใช้ message type `1` ส่วน response ใช้ type `1000 + client_id` ใน reply queue แยกต่างหาก Server จะล็อก `/ipc/server.lock` ก่อนจัดการ queue: เปิดซ้ำจะถูกปฏิเสธโดยไม่กระทบตัวเดิม แต่หลัง crash ยังลบ stale queue และเริ่มใหม่ได้
 
 ## 8. Experiment details เมื่อรัน executable โดยตรง
 
@@ -265,6 +317,18 @@ kubectl exec airplane-reservation -c client-1 -- ./load_test 20 20 CANCEL
 
 คำสั่งทั้งสองใช้ client id และ seat mapping เดียวกัน ทำให้ cancel ชุดที่สองสามารถยกเลิก reservation ที่สร้างโดยชุดแรกได้
 
+client/load test มี timeout 10 วินาทีต่อ request (รวมเวลารอส่งและรอคำตอบ) หาก timeout หลังส่งแล้ว ผลของ operation อาจเกิดขึ้นแล้วหรือยังอยู่ใน queue ให้ตรวจ `STATUS` ก่อนลองจอง/ยกเลิกซ้ำ ไม่ถือว่า timeout แปลว่า transaction ถูก rollback
+
+`load_test` ใช้ thread pool ตาม concurrency และคืน exit code ไม่เป็นศูนย์เมื่อ transport ล้มเหลว ส่วน `Operation Fail` เช่นจองที่นั่งที่มีเจ้าของแล้ว เป็นผลลัพธ์ทางธุรกิจ ไม่ใช่ transport failure
+
+หากต้องการบันทึกผล load test บน Git Bash/Linux:
+
+```bash
+mkdir -p results
+set -o pipefail
+kubectl exec airplane-reservation -c client-1 -- ./load_test 200 200 RESERVE 10 | tee "results/load-$(date +%Y%m%d-%H%M%S).txt"
+```
+
 ## 10. Logs
 
 Server log มี sequence number, worker id, client id, command/resource ที่กำลังทำงาน และ log การเข้า/ออก critical section เช่น:
@@ -286,26 +350,33 @@ make
 
 ## 12. Tests
 
-Test suite อยู่ในโฟลเดอร์ `tests/` และแบ่งเป็น 3 ระดับ:
+Test suite อยู่ในโฟลเดอร์ `tests/`:
 
 | คำสั่ง | ขอบเขต |
 | --- | --- |
 | `make test-unit` | parser, seat validation, ownership, duplicate seats, multi-seat rollback, sync/nosync concurrency |
 | `make test-integration` | server/client ผ่าน System V queue จริง, ทุก client command, CLI errors, 3 experiment modes, load test, queue cleanup/recovery |
+| `make test-regression` | บั๊กทั้ง 8 จุด, timeout/queue routing, Demo 1, script exit codes, path ที่มีช่องว่าง และ incremental build |
 | `make test-k8s` | smoke test manifests ทั้ง 3 แบบ, command lifecycle และ load test บน Kubernetes |
 
-รัน unit และ integration tests ทั้งหมดบน Linux:
+รัน unit, IPC, integration, regression, script และ build tests บน Linux (ต้องมี `/ipc` ที่เขียนได้ และไม่มี server ของงานอื่นใช้ namespace นี้):
 
 ```bash
-make test
+bash scripts/test.sh
 ```
 
 วิธีที่แนะนำบน Windows คือรันผ่าน Docker เพื่อให้ได้ Linux environment และ `/ipc` พร้อมใช้งาน:
 
 ```bash
 docker build -t airplane-reservation:latest .
-docker run --rm airplane-reservation:latest make test
+docker run --name reservation-tests airplane-reservation:latest timeout 300s bash scripts/test.sh
+docker cp reservation-tests:/app/results ./results-from-container
+docker rm reservation-tests
 ```
+
+คำสั่ง `docker cp` เก็บหลักฐานออกมาก่อนลบ container; ถ้า tests fail ก็ยัง copy ผลมาตรวจได้ ส่วน `make test` รันชุดเดียวกัน แต่ `scripts/test.sh` เพิ่ม transcript รวม `test-output.txt`
+
+CI ใน `.github/workflows/ci.yml` build image และรันชุดเดียวกันเมื่อ push ไป main/development หรือเปิด PR เข้า branch เหล่านั้น พร้อม upload `reservation-test-results` แม้ tests fail (เก็บ 14 วัน) การทดสอบ quoting ของ Kubernetes ใน CI ใช้ mock; ไม่ใช่การ deploy Kubernetes จริง
 
 สำหรับ Kubernetes ให้ build image ก่อน เปิด Docker Desktop Kubernetes แล้วรันจาก Git Bash หรือ WSL:
 
@@ -321,4 +392,6 @@ Kubernetes smoke test จะลบและสร้าง Pod `airplane-reserva
 
 - Reservation data อยู่ใน memory ของ server process เท่านั้น และจะ reset เมื่อ server restart
 - Queue lifecycle ถูกจัดการโดย System V kernel queue; ให้ใช้ container/Pod ใหม่เมื่อเปลี่ยน experiment เพื่อแยกผลการทดลอง
+- Reply queue ถูกลบเมื่อคำสั่งจบหรือ timeout แต่ถ้า client ถูก `SIGKILL` ระหว่างรอ อาจเหลือ queue จน IPC namespace ของ container/Pod ถูกลบ
+- หลังแก้ source หรือ message format ต้อง build image ใหม่และสร้าง Pod ใหม่ทั้งชุด ห้ามผสม binary เก่ากับใหม่
 - `nosync` เป็นโหมดทดลองที่จงใจปล่อยให้เกิด race condition ไม่ควรใช้เป็น production mode

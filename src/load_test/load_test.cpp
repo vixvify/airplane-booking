@@ -1,13 +1,9 @@
 #include "../constants/constants.h"
-#include "../models/message.h"
+#include "../ipc/message_queue.h"
 #include "../utils/cli_parser.h"
-
-#include <sys/ipc.h>
-#include <sys/msg.h>
-
-#include <algorithm>
+#include <atomic>
 #include <chrono>
-#include <cstring>
+#include <limits>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -15,6 +11,8 @@
 #include <vector>
 
 using namespace std;
+
+namespace {
 
 struct LoadTestResult {
     long long completed = 0;
@@ -87,11 +85,6 @@ int getSeatId(
     return (requestNumber % Constants::SEAT_COUNT) + 1;
 }
 
-void recordTransportFailure(LoadTestResult& result) {
-    lock_guard<mutex> lock(resultMutex);
-    result.transportFailed++;
-}
-
 void recordResponse(
     LoadTestResult& result,
     Operation operation,
@@ -125,60 +118,22 @@ void sendRequest(
     int seatId = getSeatId(requestNumber, fixedSeatId);
     string command = makeCommand(operation, seatId);
 
-    RequestMessage request{};
-    request.mtype = Constants::REQUEST_TYPE;
-    request.clientId = clientId;
-
-    strncpy(
-        request.command,
-        command.c_str(),
-        sizeof(request.command) - 1
-    );
-    request.command[sizeof(request.command) - 1] = '\0';
-
-    auto start = chrono::high_resolution_clock::now();
-
-    if (
-        msgsnd(
-            messageQueueId,
-            &request,
-            sizeof(RequestMessage) - sizeof(long),
-            0
-        ) == -1
-    ) {
-        recordTransportFailure(result);
-        return;
+    const auto start = chrono::steady_clock::now();
+    try {
+        const auto response = ipc::exchangeCommand(messageQueueId, clientId, command);
+        const auto latency = chrono::duration_cast<chrono::microseconds>(
+            chrono::steady_clock::now() - start
+        ).count();
+        recordResponse(result, operation, response, latency);
+    } catch (const exception& error) {
+        lock_guard<mutex> lock(resultMutex);
+        if (result.transportFailed++ == 0) {
+            cerr << "Transport error: " << error.what() << "\n";
+        }
     }
-
-    ResponseMessage response{};
-    long responseType =
-        Constants::RESPONSE_TYPE_BASE + clientId;
-
-    if (
-        msgrcv(
-            messageQueueId,
-            &response,
-            sizeof(ResponseMessage) - sizeof(long),
-            responseType,
-            0
-        ) == -1
-    ) {
-        recordTransportFailure(result);
-        return;
-    }
-
-    auto end = chrono::high_resolution_clock::now();
-    auto latency = chrono::duration_cast<chrono::microseconds>(
-        end - start
-    ).count();
-
-    recordResponse(
-        result,
-        operation,
-        response.response,
-        latency
-    );
 }
+
+} // namespace
 
 int main(int argc, char* argv[]) {
     if (argc != 4 && argc != 5) {
@@ -223,24 +178,18 @@ int main(int argc, char* argv[]) {
         concurrency = totalRequests;
     }
 
-    key_t key = ftok(
-        Constants::QUEUE_PATH,
-        Constants::QUEUE_PROJECT_ID
-    );
-
-    if (key == -1) {
-        perror("ftok");
+    if (totalRequests > numeric_limits<int>::max() - 10000) {
+        cerr << "Too many requests for the client ID range\n";
         return 1;
     }
-
-    int messageQueueId = msgget(key, 0666);
-
-    if (messageQueueId == -1) {
-        perror("msgget");
-        cout << "Make sure server is running.\n";
+    int messageQueueId;
+    try {
+        messageQueueId = ipc::MessageQueue::openRequests().id();
+    } catch (const exception& error) {
+        cerr << error.what() << "\nMake sure server is running.\n";
         return 1;
     }
-
+    cout << unitbuf;
     cout << "\n";
     cout << "====================================\n";
     cout << " Airplane Reservation Load Test\n";
@@ -271,35 +220,32 @@ int main(int argc, char* argv[]) {
     cout << "====================================\n\n";
 
     LoadTestResult result;
-    auto testStart = chrono::high_resolution_clock::now();
-    int requestNumber = 0;
-
-    while (requestNumber < totalRequests) {
-        vector<thread> threads;
-        int batchSize = min(
-            concurrency,
-            totalRequests - requestNumber
-        );
-
-        for (int i = 0; i < batchSize; i++) {
-            threads.emplace_back(
-                sendRequest,
-                messageQueueId,
-                requestNumber,
-                operation,
-                fixedSeatId,
-                ref(result)
-            );
-
-            requestNumber++;
+    auto testStart = chrono::steady_clock::now();
+    atomic<long long> nextRequest{0};
+    vector<thread> threads;
+    bool launchFailed = false;
+    try {
+        for (int i = 0; i < concurrency; ++i) {
+            threads.emplace_back([&] {
+                while (true) {
+                    const auto requestNumber = nextRequest.fetch_add(1);
+                    if (requestNumber >= totalRequests) {
+                        break;
+                    }
+                    sendRequest(messageQueueId, static_cast<int>(requestNumber),
+                                operation, fixedSeatId, result);
+                }
+            });
         }
-
-        for (auto& thread : threads) {
-            thread.join();
-        }
+    } catch (const exception& error) {
+        cerr << "Unable to start load-test threads: " << error.what() << "\n";
+        launchFailed = true;
+    }
+    for (auto& thread : threads) {
+        thread.join();
     }
 
-    auto testEnd = chrono::high_resolution_clock::now();
+    auto testEnd = chrono::steady_clock::now();
     double totalSeconds = chrono::duration<double>(
         testEnd - testStart
     ).count();
@@ -371,5 +317,5 @@ int main(int argc, char* argv[]) {
         << " ms\n";
     cout << "====================================\n";
 
-    return 0;
+    return launchFailed || result.transportFailed != 0 ? 1 : 0;
 }

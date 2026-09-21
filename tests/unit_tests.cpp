@@ -130,6 +130,19 @@ void testInitialStateAndSeatBounds() {
     );
 }
 
+void testSeatTokenParser() {
+    for (const string input : {"1 9999999999999999999999999999", "1 2x", "", "1 -999999999999999999999"}) {
+        stringstream stream(input);
+        vector<int> seats{20};
+        expect(!parseSeatIds(stream, seats), "invalid seat tokens must fail");
+        expect(seats == vector<int>{20}, "failed parse must not expose a partial list");
+    }
+    stringstream valid("3 1 3 -1 0 +2");
+    vector<int> seats;
+    expect(parseSeatIds(valid, seats), "valid integers should parse before domain validation");
+    expect(seats == vector<int>({3, 1, 3, -1, 0, 2}), "parser must preserve values");
+}
+
 void testDuplicateSeatsAreNormalized() {
     setSynchronization(true);
 
@@ -390,6 +403,7 @@ bool runIsolated(const TestCase& test) {
 int main() {
     vector<TestCase> tests = {
         {"positive integer parser", testPositiveIntegerParser},
+        {"complete seat-token parsing", testSeatTokenParser},
         {"initial state and seat bounds", testInitialStateAndSeatBounds},
         {"duplicate seat normalization", testDuplicateSeatsAreNormalized},
         {"invalid requests preserve state", testInvalidReservationDoesNotMutateState},

@@ -1,10 +1,7 @@
-*.o
-*.out
+.git
 /build/
 /server
 /client
 /load_test
 /tests/bin/
 /results/
-
-.vscode/
