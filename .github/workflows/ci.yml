@@ -2,37 +2,42 @@ name: C++ CI
 
 on:
   push:
-    branches:
-      - main
-      - development
+    branches: [main, development]
   pull_request:
-    branches:
-      - main
-      - development
+    branches: [main, development]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install build tools
+      - uses: actions/checkout@v4
+      - name: Build Linux image
+        run: docker build -t airplane-reservation:ci .
+      - name: Unit, integration, regression and script tests
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y g++ make
-
-      - name: Show compiler version
+          set -euo pipefail
+          mkdir -p results
+          docker run --name reservation-ci \
+            -v "$PWD/results:/app/results" \
+            airplane-reservation:ci timeout 300s bash scripts/test.sh
+      - name: Save container output
+        if: always()
         run: |
-          g++ --version
-          make --version
+          mkdir -p results
+          docker logs reservation-ci > results/container.txt 2>&1 || true
+          docker rm -f reservation-ci >/dev/null 2>&1 || true
 
-      - name: Build
-        run: make
-
-      - name: Check binaries
-        run: |
-          test -f server
-          test -f client
-          test -f load_test
+          sudo chmod -R a+rX results
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reservation-test-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14

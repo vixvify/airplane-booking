@@ -4,6 +4,7 @@
 #include "../models/message.h"
 #include "../reservation/reservation.h"
 #include "../utils/logger.h"
+#include "../utils/cli_parser.h"
 
 #include <sys/msg.h>
 
@@ -16,19 +17,6 @@
 using namespace std;
 
 namespace {
-
-bool parseSeatIds(stringstream& ss, vector<int>& seatIds) {
-    int seatId;
-    while (ss >> seatId) {
-        seatIds.push_back(seatId);
-    }
-    return ss.eof() && !seatIds.empty();
-}
-
-bool hasExtraArguments(stringstream& ss) {
-    string extra;
-    return static_cast<bool>(ss >> extra);
-}
 
 string processCommand(
     int workerId,
@@ -125,7 +113,7 @@ void worker(
             sizeof(RequestMessage)
                 - sizeof(long),
             Constants::REQUEST_TYPE,
-            0
+            MSG_NOERROR
         );
 
         if (received == -1) {
@@ -139,7 +127,11 @@ void worker(
             continue;
         }
 
-        request.command[sizeof(request.command) - 1] = '\0';
+        if (received != sizeof(RequestMessage) - sizeof(long)
+            || request.clientId <= 0 || request.replyQueueId < 0
+            || std::memchr(request.command, '\0', sizeof(request.command)) == nullptr) {
+            continue;
+        }
 
         string command(
             request.command
@@ -180,11 +172,11 @@ void worker(
 
         if (
             msgsnd(
-                messageQueueId,
+                request.replyQueueId,
                 &response,
                 sizeof(ResponseMessage)
                     - sizeof(long),
-                0
+                IPC_NOWAIT
             ) == -1
         ) {
 

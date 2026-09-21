@@ -4,6 +4,7 @@
 struct RequestMessage {
     long mtype;
     int clientId;
+    int replyQueueId;
     char command[128];
 };
 

@@ -6,23 +6,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POD_NAME="${POD_NAME:-airplane-reservation}"
 PASS_COUNT=0
 
-if [ -n "${KUBECTL:-}" ]; then
-  if ! command -v "$KUBECTL" >/dev/null 2>&1 && [ ! -x "$KUBECTL" ]; then
-    echo "KUBECTL does not point to an executable: $KUBECTL" >&2
-    exit 1
-  fi
-elif command -v kubectl.exe >/dev/null 2>&1; then
-  KUBECTL="kubectl.exe"
-elif [ -x "/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
-  KUBECTL="/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
-elif [ -x "/mnt/c/Program Files/Docker/Docker/resources/bin/kubectl.exe" ]; then
-  KUBECTL="/mnt/c/Program Files/Docker/Docker/resources/bin/kubectl.exe"
-elif command -v kubectl >/dev/null 2>&1; then
-  KUBECTL="kubectl"
-else
-  echo "kubectl was not found. Add it to PATH or set KUBECTL." >&2
-  exit 1
-fi
+source "$ROOT_DIR/scripts/lib/runtime.sh"
+resolve_kubectl
+export KUBECTL
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -80,7 +66,7 @@ apply_manifest() {
   fi
 
   local ready
-  ready="$($KUBECTL get pod "$POD_NAME" -o jsonpath='{.status.containerStatuses[*].ready}')"
+  ready="$("$KUBECTL" get pod "$POD_NAME" -o jsonpath='{.status.containerStatuses[*].ready}')"
 
   if [ "$ready" != "true true true true true true" ]; then
     fail "$manifest did not start all six containers"
@@ -146,7 +132,7 @@ echo "Running Kubernetes command and load smoke tests"
 
 apply_manifest "k8s/pod-sync.yaml"
 
-command_output="$($KUBECTL exec "$POD_NAME" -c client-1 -- \
+command_output="$("$KUBECTL" exec "$POD_NAME" -c client-1 -- \
   sh -c "printf 'STATUS 1\nRESERVE 1 2\nSTATUS 1\nCANCEL 1 2\nSTATUS 1\nQUIT\n' | ./client 1")"
 
 for expected in \
@@ -163,7 +149,7 @@ for expected in \
 done
 pass "Kubernetes command lifecycle"
 
-load_output="$($KUBECTL exec "$POD_NAME" -c client-1 -- \
+load_output="$("$KUBECTL" exec "$POD_NAME" -c client-1 -- \
   ./load_test 1000 20 STATUS)"
 
 for expected in \
