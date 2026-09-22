@@ -38,8 +38,8 @@ void expectTimeout(F operation, const char* expected) {
 
 int main() {
     try {
-        auto requests = ipc::MessageQueue::createPrivate();
-        auto responses = ipc::MessageQueue::createPrivate();
+        auto requests = ipc::MessageQueue::createRequests();
+        auto responses = ipc::MessageQueue::createResponses();
 
         // No worker: a sent request must time out instead of waiting forever.
         expectTimeout([&] {
@@ -76,17 +76,23 @@ int main() {
         }, "request was not sent");
         std::cout << "[PASS] bounded request wait when queue is full\n";
 
+        // Drain the filler messages so the queue can be reused.
+        while (
+            msgrcv(
+                requests.id(), &filler, sizeof(filler) - sizeof(long),
+                Constants::REQUEST_TYPE, IPC_NOWAIT
+            ) >= 0
+        ) {}
+
         // The response mtype is the request ID, so an unrelated response remains
         // in the shared response queue and cannot be consumed by this request.
-        auto routingRequests = ipc::MessageQueue::createPrivate();
-        auto routingResponses = ipc::MessageQueue::createPrivate();
         std::exception_ptr workerError;
         std::thread worker([&] {
             try {
                 RequestMessage request{};
                 require(
                     msgrcv(
-                        routingRequests.id(), &request,
+                        requests.id(), &request,
                         sizeof(request) - sizeof(long),
                         Constants::REQUEST_TYPE, 0
                     ) >= 0,
@@ -102,7 +108,7 @@ int main() {
                 std::strcpy(unrelated.response, "WRONG");
                 require(
                     msgsnd(
-                        routingResponses.id(), &unrelated,
+                        responses.id(), &unrelated,
                         sizeof(unrelated) - sizeof(long), 0
                     ) == 0,
                     "test worker could not send unrelated response"
@@ -115,7 +121,7 @@ int main() {
                 std::strcpy(expected.response, "EXPECTED");
                 require(
                     msgsnd(
-                        routingResponses.id(), &expected,
+                        responses.id(), &expected,
                         sizeof(expected) - sizeof(long), 0
                     ) == 0,
                     "test worker could not send expected response"
@@ -126,7 +132,7 @@ int main() {
         });
 
         const auto result = ipc::exchangeCommand(
-            routingRequests.id(), routingResponses.id(), 7, "STATUS 7",
+            requests.id(), responses.id(), 7, "STATUS 7",
             std::chrono::milliseconds(500)
         );
         worker.join();
@@ -138,7 +144,7 @@ int main() {
         ResponseMessage leftover{};
         require(
             msgrcv(
-                routingResponses.id(), &leftover,
+                responses.id(), &leftover,
                 sizeof(leftover) - sizeof(long),
                 0, IPC_NOWAIT
             ) >= 0,
