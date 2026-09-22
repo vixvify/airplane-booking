@@ -15,6 +15,7 @@ mock transport, not a real Kubernetes cluster.
 | Bug | Regression | Expected result |
 | --- | --- | --- |
 | Shared queue deadlocks under load | `regression_tests.sh`: 200 concurrent RESERVE requests | All 200 complete, no transport failures, exactly one winner in sync mode |
+| Timed-out client leaves a response in the shared queue | `ipc_tests.cpp`: worker completes an expired RESERVE response, then handles STATUS | Expired response is discarded and the worker remains usable |
 | Starting another server destroys the active queue | `regression_tests.sh`: duplicate server; `integration_tests.sh`: crash recovery | Duplicate exits unsuccessfully; original reservation survives; stale queue can still be recovered after SIGKILL |
 | Long commands execute a truncated prefix | `regression_tests.sh`: 129-byte invalid reservation and 127-byte valid command | Reject the entire long input, preserve seat state, continue the session |
 | Overflow in a seat list accepts the valid prefix | `unit_tests.cpp`, `regression_tests.sh`: RESERVE/CANCEL in both modes | Reject overflow without changing any seat |

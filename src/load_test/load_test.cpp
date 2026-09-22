@@ -108,7 +108,7 @@ void recordResponse(
 }
 
 void sendRequest(
-    int messageQueueId,
+    int queueId,
     int requestNumber,
     Operation operation,
     int fixedSeatId,
@@ -120,7 +120,7 @@ void sendRequest(
 
     const auto start = chrono::steady_clock::now();
     try {
-        const auto response = ipc::exchangeCommand(messageQueueId, clientId, command);
+        const auto response = ipc::exchangeCommand(queueId, clientId, command);
         const auto latency = chrono::duration_cast<chrono::microseconds>(
             chrono::steady_clock::now() - start
         ).count();
@@ -182,9 +182,9 @@ int main(int argc, char* argv[]) {
         cerr << "Too many requests for the client ID range\n";
         return 1;
     }
-    int messageQueueId;
+    int queueId;
     try {
-        messageQueueId = ipc::MessageQueue::openRequests().id();
+        queueId = ipc::MessageQueue::openSharedQueue().id();
     } catch (const exception& error) {
         cerr << error.what() << "\nMake sure server is running.\n";
         return 1;
@@ -232,7 +232,7 @@ int main(int argc, char* argv[]) {
                     if (requestNumber >= totalRequests) {
                         break;
                     }
-                    sendRequest(messageQueueId, static_cast<int>(requestNumber),
+                    sendRequest(queueId, static_cast<int>(requestNumber),
                                 operation, fixedSeatId, result);
                 }
             });

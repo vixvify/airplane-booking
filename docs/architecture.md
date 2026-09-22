@@ -14,7 +14,7 @@
 flowchart LR
     Client["Client processes\n./client <client_id>"]
     LoadTest["Load test\n./load_test ..."]
-    Queue[("Shared System V queue\nrequest: type 1\nresponse: unique responseType")]
+    Queue[("Shared System V queue\nrequest: max long\nresponse: unique responseType")]
     Workers["Worker pool\n1 หรือ 3 threads"]
     Commands["Command parser\nLIST / STATUS / RESERVE / CANCEL / QUIT"]
     Reservation["Reservation state\n20 seats in memory"]
@@ -88,8 +88,8 @@ sequenceDiagram
     participant Domain as Reservation state
 
     Client->>Client: generate unique responseType
-    Client->>Queue: msgsnd RequestMessage (type 1, responseType)
-    Worker->>Queue: msgrcv request type 1
+    Client->>Queue: msgsnd RequestMessage (type max long, responseType)
+    Worker->>Queue: msgrcv request type max long
     Worker->>Worker: parse and validate command
     Worker->>Domain: execute operation
     Domain-->>Worker: result text
@@ -97,7 +97,7 @@ sequenceDiagram
     Queue-->>Client: msgrcv responseType
 ```
 
-worker ทุกตัวอ่านเฉพาะ request type `1` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน client สร้าง `responseType` เฉพาะต่อคำสั่งจาก process ID และ sequence number แล้ว worker จะส่ง response กลับเข้า queue เดิมด้วย type นั้น จึงแยกคำตอบได้แม้หลาย process ใช้ client ID เดียวกัน
+worker ทุกตัวอ่านเฉพาะ request type ค่าสูงสุดของ `long` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน client สร้าง `responseType` เฉพาะต่อคำสั่งจาก process ID และ sequence number แล้ว worker จะส่ง response กลับเข้า queue เดิมด้วย type นั้น จึงแยกคำตอบได้แม้หลาย process ใช้ client ID ซ้ำ การกำหนด request type ให้อยู่เหนือ response ทุกประเภท ทำให้ worker สามารถค้นหาและล้าง response ที่หมดอายุได้โดยไม่ต้องนำ request ออกจาก queue
 
 ### Message contract
 
@@ -106,17 +106,19 @@ struct RequestMessage {
     long mtype;
     int clientId;
     long responseType;
+    int64_t responseDeadlineEpochMs;
     char command[128];
 };
 
 struct ResponseMessage {
     long mtype;
     int clientId;
+    int64_t responseDeadlineEpochMs;
     char response[2048];
 };
 ```
 
-request และ response ใช้ struct คนละแบบแต่เดินทางผ่าน queue เดียวกัน โดยแยกด้วย message type: worker รับเฉพาะ type `1` และ client รับเฉพาะ `responseType` ของตัวเอง เพื่อป้องกัน deadlock เมื่อ queue อิ่ม worker จะเก็บ response ที่ส่งไม่ได้ไว้ใน memory ชั่วคราว แล้วรับ request ต่อเพื่อสร้างพื้นที่ ก่อน retry ส่ง response แบบ non-blocking พร้อม deadline 10 วินาทีที่ client หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
+request และ response ใช้ struct คนละแบบแต่เดินทางผ่าน queue เดียวกัน โดยแยกด้วย message type: worker รับเฉพาะ request type และ client รับเฉพาะ `responseType` ของตัวเอง เพื่อป้องกัน deadlock เมื่อ queue อิ่ม worker จะเก็บ response ที่ส่งไม่ได้ไว้ใน memory ชั่วคราว (สูงสุด 256 รายการต่อ worker) แล้วรับ request ต่อเพื่อสร้างพื้นที่ ก่อน retry ส่ง response แบบ non-blocking. request จะพก deadline 10 วินาที และ worker จะทิ้ง response ที่หมดอายุทั้งจาก pending memory และ shared queue เพื่อไม่ให้ client ที่ timeout ทำให้ queue ค้างเต็ม หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
 
 ## 4. Server และ worker pool
 
@@ -299,7 +301,7 @@ sequence number บอกลำดับที่ log ถูกพิมพ์ �
 | --- | --- |
 | จำนวนที่นั่ง | 20 |
 | จำนวน worker เริ่มต้น | 3 |
-| Request message type | `1` |
+| Request message type | ค่าสูงสุดของ `long` |
 | Response message type | `responseType` เฉพาะคำสั่ง (`1000 + process ID × 1,048,576 + sequence`) |
 | Queue key | `ftok("/ipc", 'A')` |
 | Random delay | 50-500 ms |

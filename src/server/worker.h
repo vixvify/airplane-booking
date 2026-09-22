@@ -3,7 +3,7 @@
 
 void worker(
     int workerId,
-    int messageQueueId
+    int queueId
 );
 
 #endif

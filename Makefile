@@ -10,7 +10,7 @@ SERVER_SOURCES = src/server/server.cpp src/server/worker.cpp src/ipc/server_lock
 CLIENT_SOURCES = src/client/client.cpp $(IPC_SOURCES) $(COMMON_SOURCES)
 LOAD_TEST_SOURCES = src/load_test/load_test.cpp $(IPC_SOURCES) $(COMMON_SOURCES)
 UNIT_TEST_SOURCES = tests/unit_tests.cpp $(RESERVATION_SOURCES) $(COMMON_SOURCES)
-IPC_TEST_SOURCES = tests/ipc_tests.cpp $(IPC_SOURCES)
+IPC_TEST_SOURCES = tests/ipc_tests.cpp src/server/worker.cpp $(IPC_SOURCES) $(RESERVATION_SOURCES) $(COMMON_SOURCES)
 SOURCES = $(sort $(SERVER_SOURCES) $(CLIENT_SOURCES) $(LOAD_TEST_SOURCES) $(UNIT_TEST_SOURCES) $(IPC_TEST_SOURCES))
 OBJECTS = $(SOURCES:%.cpp=build/%.o)
 UNIT_TEST_BINARY = tests/bin/unit_tests

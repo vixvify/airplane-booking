@@ -12,8 +12,8 @@ public:
     MessageQueue(const MessageQueue&) = delete;
     MessageQueue& operator=(const MessageQueue&) = delete;
 
-    static MessageQueue openRequests();
-    static MessageQueue createRequests();
+    static MessageQueue openSharedQueue();
+    static MessageQueue createSharedQueue();
     int id() const { return id_; }
     void remove();
 
@@ -23,7 +23,7 @@ private:
 };
 
 std::string exchangeCommand(
-    int requestQueueId, int clientId, const std::string& command,
+    int queueId, int clientId, const std::string& command,
     std::chrono::milliseconds timeout = std::chrono::seconds(10)
 );
 

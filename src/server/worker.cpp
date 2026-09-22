@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
 #include <deque>
 #include <sstream>
@@ -21,13 +22,72 @@ using namespace std;
 
 namespace {
 
+std::int64_t currentEpochMilliseconds() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+}
+
+bool responseExpired(const ResponseMessage& response) {
+    return response.responseDeadlineEpochMs <= currentEpochMilliseconds();
+}
+
+bool requeueLiveResponse(int queueId, const ResponseMessage& response, size_t size) {
+    while (!responseExpired(response)) {
+        if (msgsnd(queueId, &response, size, IPC_NOWAIT) == 0) {
+            return true;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
+        }
+        if (errno != EIDRM && errno != EINVAL) {
+            perror("msgsnd");
+        }
+        return false;
+    }
+    return true;
+}
+
+bool discardExpiredResponse(int queueId) {
+    ResponseMessage message{};
+    const ssize_t received = msgrcv(
+        queueId,
+        &message,
+        sizeof(ResponseMessage) - sizeof(long),
+        -Constants::MAX_RESPONSE_TYPE,
+        IPC_NOWAIT
+    );
+    if (received == -1) {
+        if (errno == ENOMSG) {
+            return true;
+        }
+        if (errno != EIDRM && errno != EINVAL) {
+            perror("msgrcv");
+        }
+        return false;
+    }
+
+    if (responseExpired(message)) {
+        return true;
+    }
+    return requeueLiveResponse(queueId, message, received);
+}
+
 bool flushPendingResponses(
-    int messageQueueId,
+    int queueId,
     deque<ResponseMessage>& pendingResponses
 ) {
     while (!pendingResponses.empty()) {
         ResponseMessage& response = pendingResponses.front();
-        if (msgsnd(messageQueueId, &response, sizeof(ResponseMessage) - sizeof(long),
+        if (responseExpired(response)) {
+            pendingResponses.pop_front();
+            continue;
+        }
+        if (msgsnd(queueId, &response, sizeof(ResponseMessage) - sizeof(long),
                    IPC_NOWAIT) == 0) {
             pendingResponses.pop_front();
             continue;
@@ -128,26 +188,33 @@ string processCommand(
 }
 void worker(
     int workerId,
-    int messageQueueId
+    int queueId
 ) {
 
     deque<ResponseMessage> pendingResponses;
 
     while (true) {
 
-        if (!flushPendingResponses(messageQueueId, pendingResponses)) {
+        if (!flushPendingResponses(queueId, pendingResponses)) {
             break;
+        }
+        if (pendingResponses.size() >= Constants::MAX_PENDING_RESPONSES_PER_WORKER) {
+            if (!discardExpiredResponse(queueId)) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            continue;
         }
 
         RequestMessage request{};
 
         ssize_t received = msgrcv(
-            messageQueueId,
+            queueId,
             &request,
             sizeof(RequestMessage)
                 - sizeof(long),
             Constants::REQUEST_TYPE,
-            MSG_NOERROR | (pendingResponses.empty() ? 0 : IPC_NOWAIT)
+            MSG_NOERROR | IPC_NOWAIT
         );
 
         if (received == -1) {
@@ -157,7 +224,10 @@ void worker(
             if (errno == EINTR) {
                 continue;
             }
-            if (errno == ENOMSG && !pendingResponses.empty()) {
+            if (errno == ENOMSG) {
+                if (!discardExpiredResponse(queueId)) {
+                    break;
+                }
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
                 continue;
             }
@@ -167,6 +237,7 @@ void worker(
 
         if (received != sizeof(RequestMessage) - sizeof(long)
             || request.clientId <= 0 || request.responseType <= Constants::RESPONSE_TYPE_BASE
+            || request.responseDeadlineEpochMs <= 0
             || std::memchr(request.command, '\0', sizeof(request.command)) == nullptr) {
             continue;
         }
@@ -195,6 +266,8 @@ void worker(
 
         response.clientId =
             request.clientId;
+
+        response.responseDeadlineEpochMs = request.responseDeadlineEpochMs;
 
         strncpy(
             response.response,

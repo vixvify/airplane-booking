@@ -165,7 +165,7 @@ docker exec -it airplane-reservation ./client 4
 docker exec -it airplane-reservation ./client 5
 ```
 
-แต่ละ client รับคำสั่งจาก stdin และรอ response ใน System V queue เดียวกันกับ request โดย request ใช้ message type `1` ส่วน response ใช้ `responseType` ที่สร้างเฉพาะสำหรับคำสั่งนั้น จึงไม่รับคำตอบสลับกันแม้ client ID ซ้ำ
+แต่ละ client รับคำสั่งจาก stdin และรอ response ใน System V queue เดียวกันกับ request โดย request ใช้ message type ค่าสูงสุดของ `long` ส่วน response ใช้ `responseType` ที่สร้างเฉพาะสำหรับคำสั่งนั้น จึงไม่รับคำตอบสลับกันแม้ client ID ซ้ำ
 
 ### Concurrent test บน Docker
 
@@ -251,7 +251,7 @@ QUIT
 - `nosync` ปิด mutex เพื่อสาธิต race condition
 - `worker_count` อยู่ระหว่าง 1–64 และค่าเริ่มต้นคือ 3
 
-Server ใช้ System V queue เดียวที่สร้างจาก `ftok("/ipc", 'A')`: request ใช้ message type `1` ส่วน response ใช้ `responseType` เฉพาะของคำสั่งใน queue เดียวกัน Server จะล็อก `/ipc/server.lock` ก่อนจัดการ queue: เปิดซ้ำจะถูกปฏิเสธโดยไม่กระทบตัวเดิม แต่หลัง crash ยังลบ stale queue และเริ่มใหม่ได้
+Server ใช้ System V queue เดียวที่สร้างจาก `ftok("/ipc", 'A')`: request ใช้ message type ค่าสูงสุดของ `long` ส่วน response ใช้ `responseType` เฉพาะของคำสั่งใน queue เดียวกัน Server จะล็อก `/ipc/server.lock` ก่อนจัดการ queue: เปิดซ้ำจะถูกปฏิเสธโดยไม่กระทบตัวเดิม แต่หลัง crash ยังลบ stale queue และเริ่มใหม่ได้
 
 ## 8. Experiment details เมื่อรัน executable โดยตรง
 
@@ -392,6 +392,6 @@ Kubernetes smoke test จะลบและสร้าง Pod `airplane-reserva
 
 - Reservation data อยู่ใน memory ของ server process เท่านั้น และจะ reset เมื่อ server restart
 - Queue lifecycle ถูกจัดการโดย System V kernel queue; ให้ใช้ container/Pod ใหม่เมื่อเปลี่ยน experiment เพื่อแยกผลการทดลอง
-- หาก client timeout หลังส่ง request ผลของ operation ยังไม่แน่นอน ให้ตรวจ `STATUS` ก่อน retry
+- หาก client timeout หลังส่ง request ผลของ operation ยังไม่แน่นอน ให้ตรวจ `STATUS` ก่อน retry; request กำหนด deadline ให้ response และ worker จะทิ้ง response ที่หมดอายุ เพื่อไม่ให้ค้างเต็ม shared queue
 - หลังแก้ source หรือ message format ต้อง build image ใหม่และสร้าง Pod ใหม่ทั้งชุด ห้ามผสม binary เก่ากับใหม่
 - `nosync` เป็นโหมดทดลองที่จงใจปล่อยให้เกิด race condition ไม่ควรใช้เป็น production mode
