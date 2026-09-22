@@ -12,7 +12,6 @@ public:
     MessageQueue(const MessageQueue&) = delete;
     MessageQueue& operator=(const MessageQueue&) = delete;
 
-    static MessageQueue createReply();
     static MessageQueue openRequests();
     static MessageQueue createRequests();
     int id() const { return id_; }

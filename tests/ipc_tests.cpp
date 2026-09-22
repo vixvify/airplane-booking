@@ -5,6 +5,7 @@
 #include <sys/msg.h>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -25,11 +26,23 @@ void expectTimeout(F operation, const char* expected) {
     require(std::chrono::steady_clock::now() - start < std::chrono::seconds(2),
             "IPC timeout exceeded its bound");
 }
+
+class QueueGuard {
+public:
+    QueueGuard() : id_(msgget(IPC_PRIVATE, IPC_CREAT | 0600)) {
+        if (id_ == -1) throw std::runtime_error("could not create test queue");
+    }
+    ~QueueGuard() { msgctl(id_, IPC_RMID, nullptr); }
+    int id() const { return id_; }
+
+private:
+    int id_;
+};
 }
 
 int main() {
     try {
-        auto requests = ipc::MessageQueue::createReply();
+        QueueGuard requests;
         // No worker: a successfully sent request must time out, not hang forever.
         expectTimeout([&] {
             ipc::exchangeCommand(requests.id(), 1, "STATUS 1", std::chrono::milliseconds(30));
@@ -37,10 +50,9 @@ int main() {
         RequestMessage pending{};
         require(msgrcv(requests.id(), &pending, sizeof(pending) - sizeof(long),
                        Constants::REQUEST_TYPE, IPC_NOWAIT) >= 0, "request was not sent");
-        msqid_ds status{};
-        require(msgctl(pending.replyQueueId, IPC_STAT, &status) == -1,
-                "timed-out request leaked its reply queue");
-        std::cout << "[PASS] bounded response wait and private-queue cleanup\n";
+        require(pending.responseType > Constants::RESPONSE_TYPE_BASE,
+                "request did not include a response type");
+        std::cout << "[PASS] bounded response wait on the shared queue\n";
 
         RequestMessage filler{};
         filler.mtype = Constants::REQUEST_TYPE;
@@ -55,6 +67,28 @@ int main() {
         catch (const std::invalid_argument&) { rejected = true; }
         require(rejected, "embedded NUL must be rejected before transport");
         std::cout << "[PASS] embedded NUL rejection\n";
+
+        QueueGuard sharedQueue;
+        auto first = std::async(std::launch::async, [&] {
+            return ipc::exchangeCommand(sharedQueue.id(), 42, "STATUS 1");
+        });
+        auto second = std::async(std::launch::async, [&] {
+            return ipc::exchangeCommand(sharedQueue.id(), 42, "STATUS 2");
+        });
+        for (int i = 0; i < 2; ++i) {
+            RequestMessage request{};
+            require(msgrcv(sharedQueue.id(), &request, sizeof(request) - sizeof(long),
+                           Constants::REQUEST_TYPE, 0) >= 0, "request was not received");
+            ResponseMessage response{};
+            response.mtype = request.responseType;
+            response.clientId = request.clientId;
+            std::strncpy(response.response, request.command, sizeof(response.response) - 1);
+            require(msgsnd(sharedQueue.id(), &response, sizeof(response) - sizeof(long), 0) == 0,
+                    "response was not sent");
+        }
+        require(first.get() == "STATUS 1", "first concurrent response was misrouted");
+        require(second.get() == "STATUS 2", "second concurrent response was misrouted");
+        std::cout << "[PASS] shared queue routes concurrent commands for the same client ID\n";
     } catch (const std::exception& error) {
         std::cerr << "[FAIL] " << error.what() << "\n";
         return 1;

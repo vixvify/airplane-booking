@@ -8,15 +8,43 @@
 
 #include <sys/msg.h>
 
+#include <chrono>
 #include <cerrno>
 #include <cstring>
+#include <deque>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace std;
 
 namespace {
+
+bool flushPendingResponses(
+    int messageQueueId,
+    deque<ResponseMessage>& pendingResponses
+) {
+    while (!pendingResponses.empty()) {
+        ResponseMessage& response = pendingResponses.front();
+        if (msgsnd(messageQueueId, &response, sizeof(ResponseMessage) - sizeof(long),
+                   IPC_NOWAIT) == 0) {
+            pendingResponses.pop_front();
+            continue;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN) {
+            return true;
+        }
+        if (errno != EIDRM && errno != EINVAL) {
+            perror("msgsnd");
+        }
+        return false;
+    }
+    return true;
+}
 
 string processCommand(
     int workerId,
@@ -103,7 +131,13 @@ void worker(
     int messageQueueId
 ) {
 
+    deque<ResponseMessage> pendingResponses;
+
     while (true) {
+
+        if (!flushPendingResponses(messageQueueId, pendingResponses)) {
+            break;
+        }
 
         RequestMessage request{};
 
@@ -113,7 +147,7 @@ void worker(
             sizeof(RequestMessage)
                 - sizeof(long),
             Constants::REQUEST_TYPE,
-            MSG_NOERROR
+            MSG_NOERROR | (pendingResponses.empty() ? 0 : IPC_NOWAIT)
         );
 
         if (received == -1) {
@@ -123,12 +157,16 @@ void worker(
             if (errno == EINTR) {
                 continue;
             }
+            if (errno == ENOMSG && !pendingResponses.empty()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue;
+            }
             perror("msgrcv");
             continue;
         }
 
         if (received != sizeof(RequestMessage) - sizeof(long)
-            || request.clientId <= 0 || request.replyQueueId < 0
+            || request.clientId <= 0 || request.responseType <= Constants::RESPONSE_TYPE_BASE
             || std::memchr(request.command, '\0', sizeof(request.command)) == nullptr) {
             continue;
         }
@@ -153,9 +191,7 @@ void worker(
 
         ResponseMessage response{};
 
-        response.mtype =
-            Constants::RESPONSE_TYPE_BASE
-            + request.clientId;
+        response.mtype = request.responseType;
 
         response.clientId =
             request.clientId;
@@ -170,17 +206,6 @@ void worker(
             sizeof(response.response) - 1
         ] = '\0';
 
-        if (
-            msgsnd(
-                request.replyQueueId,
-                &response,
-                sizeof(ResponseMessage)
-                    - sizeof(long),
-                IPC_NOWAIT
-            ) == -1
-        ) {
-
-            perror("msgsnd");
-        }
+        pendingResponses.push_back(response);
     }
 }

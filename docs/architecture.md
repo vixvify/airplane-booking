@@ -14,8 +14,7 @@
 flowchart LR
     Client["Client processes\n./client <client_id>"]
     LoadTest["Load test\n./load_test ..."]
-    Queue[("Shared request queue: type 1")]
-    Replies[("Private reply queue per command")]
+    Queue[("Shared System V queue\nrequest: type 1\nresponse: unique responseType")]
     Workers["Worker pool\n1 หรือ 3 threads"]
     Commands["Command parser\nLIST / STATUS / RESERVE / CANCEL / QUIT"]
     Reservation["Reservation state\n20 seats in memory"]
@@ -27,9 +26,9 @@ flowchart LR
     Workers --> Commands
     Commands --> Reservation
     Reservation -. sync mode .-> Locks
-    Workers -->|ResponseMessage| Replies
-    Replies -->|response| Client
-    Replies -->|response| LoadTest
+    Workers -->|ResponseMessage| Queue
+    Queue -->|response| Client
+    Queue -->|response| LoadTest
 ```
 
 ข้อมูลที่นั่งไม่ได้อยู่ใน database และไม่ถูกเขียนลงไฟล์ เมื่อ server หรือ Pod หยุด ข้อมูลทั้งหมดจะหายไป
@@ -61,7 +60,7 @@ flowchart TB
             C5["client-5"]
         end
 
-        Queue[("System V IPC: request queue and private reply queues")]
+        Queue[("One shared System V IPC queue")]
         SharedPath["emptyDir mounted at /ipc"]
 
         C1 <--> Queue
@@ -84,24 +83,21 @@ client หนึ่งตัวจะส่งทีละคำสั่ง แ
 ```mermaid
 sequenceDiagram
     participant Client as Client process
-    participant Queue as Shared request queue
-    participant Reply as Private reply queue
+    participant Queue as Shared System V queue
     participant Worker as Available worker
     participant Domain as Reservation state
 
-    Client->>Reply: create IPC_PRIVATE queue
-    Client->>Queue: msgsnd RequestMessage (type 1, replyQueueId)
+    Client->>Client: generate unique responseType
+    Client->>Queue: msgsnd RequestMessage (type 1, responseType)
     Worker->>Queue: msgrcv request type 1
     Worker->>Worker: parse and validate command
     Worker->>Domain: execute operation
     Domain-->>Worker: result text
-    Worker->>Reply: msgsnd ResponseMessage (type 1000 + clientId)
-    Client->>Reply: msgrcv its response type
-    Reply-->>Client: response text
-    Client->>Reply: remove private queue
+    Worker->>Queue: msgsnd ResponseMessage (type responseType)
+    Queue-->>Client: msgrcv responseType
 ```
 
-worker ทุกตัวรออ่าน request type `1` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน response ถูกส่งไปยัง `replyQueueId` ของคำสั่งนั้น ไม่ใช้พื้นที่ request queue ร่วมกัน และแยกคำตอบแม้หลาย process ใช้ client ID เดียวกัน
+worker ทุกตัวอ่านเฉพาะ request type `1` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน client สร้าง `responseType` เฉพาะต่อคำสั่งจาก process ID และ sequence number แล้ว worker จะส่ง response กลับเข้า queue เดิมด้วย type นั้น จึงแยกคำตอบได้แม้หลาย process ใช้ client ID เดียวกัน
 
 ### Message contract
 
@@ -109,7 +105,7 @@ worker ทุกตัวรออ่าน request type `1` จาก queue เ
 struct RequestMessage {
     long mtype;
     int clientId;
-    int replyQueueId;
+    long responseType;
     char command[128];
 };
 
@@ -120,7 +116,7 @@ struct ResponseMessage {
 };
 ```
 
-request และ response ใช้คนละ struct และคนละ queue เพื่อไม่ให้ request ที่เต็ม queue ขวาง worker ตอนส่งคำตอบ โค้ดร่วมอยู่ใน `src/ipc/message_queue.cpp`: ส่ง/รับแบบ non-blocking พร้อม retry และ deadline 10 วินาที จากนั้นลบ private reply queue ด้วย RAII หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
+request และ response ใช้ struct คนละแบบแต่เดินทางผ่าน queue เดียวกัน โดยแยกด้วย message type: worker รับเฉพาะ type `1` และ client รับเฉพาะ `responseType` ของตัวเอง เพื่อป้องกัน deadlock เมื่อ queue อิ่ม worker จะเก็บ response ที่ส่งไม่ได้ไว้ใน memory ชั่วคราว แล้วรับ request ต่อเพื่อสร้างพื้นที่ ก่อน retry ส่ง response แบบ non-blocking พร้อม deadline 10 วินาทีที่ client หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
 
 ## 4. Server และ worker pool
 
@@ -132,7 +128,7 @@ request และ response ใช้คนละ struct และคนละ qu
 4. สร้าง request queue ใหม่และตั้งค่า synchronization
 5. block `SIGINT`/`SIGTERM` ก่อนสร้าง threads เพื่อให้ main รับผ่าน `sigwait`
 6. สร้าง worker threads ตามจำนวนที่กำหนด (1–64)
-7. worker รับ request, ประมวลผล และส่งคำตอบไป private queue แบบไม่ block
+7. worker รับ request, ประมวลผล และส่งคำตอบกลับเข้า shared queue แบบ non-blocking
 
 เมื่อ server ได้รับ `SIGINT` หรือ `SIGTERM` จะลบ request queue แล้ว join workers ก่อนปิด process และคืน server lock ส่วน worker จะออกจาก loop เมื่อ queue ถูกลบและ `msgrcv` คืน `EIDRM` หรือ `EINVAL`
 
@@ -243,7 +239,7 @@ topology ของทั้ง 3 experiments เหมือนกันทั�
 
 ## 9. Load test
 
-`load_test` ใช้ message queue ชุดเดียวกับ client ปกติ แต่ใช้ thread pool ตามค่า concurrency แต่ละ request ใช้ client ID (`10000 + requestNumber`) สำหรับ ownership และมี private reply queue แยกคำตอบ
+`load_test` ใช้ message queue เดียวกับ client ปกติ แต่ใช้ thread pool ตามค่า concurrency แต่ละ request ใช้ client ID (`10000 + requestNumber`) สำหรับ ownership และสร้าง `responseType` เฉพาะเพื่อรับคำตอบกลับจาก shared queue
 
 รองรับ operations ต่อไปนี้:
 
@@ -304,7 +300,7 @@ sequence number บอกลำดับที่ log ถูกพิมพ์ �
 | จำนวนที่นั่ง | 20 |
 | จำนวน worker เริ่มต้น | 3 |
 | Request message type | `1` |
-| Response message type | `1000 + clientId` |
+| Response message type | `responseType` เฉพาะคำสั่ง (`1000 + process ID × 1,048,576 + sequence`) |
 | Queue key | `ftok("/ipc", 'A')` |
 | Random delay | 50-500 ms |
 | สถานะว่างภายใน array | `0` |
@@ -316,6 +312,6 @@ sequence number บอกลำดับที่ log ถูกพิมพ์ �
 - System V message queue เป็น IPC ภายในเครื่อง/Pod ไม่ใช่ network service
 - client ID เป็นตัวเลขที่ผู้เรียกกำหนดเอง ไม่มี authentication
 - `nosync` จงใจไม่ปลอดภัยต่อ concurrent updates และใช้เพื่อการทดลองเท่านั้น
-- client ที่ถูก SIGKILL อาจทิ้ง private reply queue ไว้จน IPC namespace ถูกลบ; กรณีจบปกติ/error/timeout จะ cleanup ด้วย RAII
+- client ที่ถูก SIGKILL อาจทิ้ง response ไว้ใน shared queue จน server ลบ queue ตอน shutdown/restart
 - source/message contract เปลี่ยนแล้วต้อง rebuild server และ clients พร้อมกัน
 - response มีขนาดคงที่ 2048 bytes จึงเหมาะกับจำนวนที่นั่งปัจจุบัน แต่ไม่ได้ออกแบบไว้สำหรับข้อมูลขนาดใหญ่

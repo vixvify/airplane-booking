@@ -4,8 +4,12 @@
 #include "../models/message.h"
 
 #include <sys/msg.h>
+#include <unistd.h>
+
+#include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <system_error>
 #include <thread>
@@ -32,6 +36,27 @@ void waitForRetry(std::chrono::steady_clock::time_point deadline, const char* me
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
 }
 
+long nextResponseType() {
+    constexpr unsigned long sequenceBits = 20;
+    constexpr unsigned long sequenceLimit = 1UL << sequenceBits;
+    static std::atomic<unsigned long> nextSequence{0};
+
+    const unsigned long sequence = nextSequence.fetch_add(1, std::memory_order_relaxed);
+    if (sequence >= sequenceLimit) {
+        throw std::runtime_error("response type sequence exhausted; restart the client process");
+    }
+
+    const unsigned long processId = static_cast<unsigned long>(getpid());
+    const unsigned long maxType = static_cast<unsigned long>(std::numeric_limits<long>::max());
+    if (processId > (maxType - Constants::RESPONSE_TYPE_BASE - sequence) / sequenceLimit) {
+        throw std::runtime_error("process ID cannot be represented in a response message type");
+    }
+
+    return static_cast<long>(
+        Constants::RESPONSE_TYPE_BASE + (processId * sequenceLimit) + sequence
+    );
+}
+
 }
 
 MessageQueue::~MessageQueue() {
@@ -43,14 +68,6 @@ void MessageQueue::remove() {
         msgctl(id_, IPC_RMID, nullptr);
         id_ = -1;
     }
-}
-
-MessageQueue MessageQueue::createReply() {
-    const int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
-    if (id == -1) {
-        fail("msgget reply queue");
-    }
-    return MessageQueue(id, true);
 }
 
 MessageQueue MessageQueue::openRequests() {
@@ -87,11 +104,10 @@ std::string exchangeCommand(
         throw std::invalid_argument("command must contain at most 127 bytes and no NUL bytes");
     }
 
-    auto replyQueue = MessageQueue::createReply();
     RequestMessage request{};
     request.mtype = Constants::REQUEST_TYPE;
     request.clientId = clientId;
-    request.replyQueueId = replyQueue.id();
+    request.responseType = nextResponseType();
     std::memcpy(request.command, command.c_str(), command.size() + 1);
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
@@ -103,8 +119,8 @@ std::string exchangeCommand(
     }
 
     ResponseMessage response{};
-    while (msgrcv(replyQueue.id(), &response, sizeof(response) - sizeof(long),
-                  Constants::RESPONSE_TYPE_BASE + clientId, IPC_NOWAIT) == -1) {
+    while (msgrcv(requestQueueId, &response, sizeof(response) - sizeof(long),
+                  request.responseType, IPC_NOWAIT) == -1) {
         if (errno != ENOMSG && errno != EINTR) {
             fail("receive response");
         }
