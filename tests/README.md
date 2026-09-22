@@ -14,7 +14,7 @@ mock transport, not a real Kubernetes cluster.
 
 | Bug | Regression | Expected result |
 | --- | --- | --- |
-| Shared request/reply queue deadlocks under load | `regression_tests.sh`: 200 concurrent RESERVE requests | All 200 complete, no transport failures, exactly one winner in sync mode |
+| Shared request/reply queue deadlocks under load | `regression_tests.sh`: 200 concurrent RESERVE requests | Separate shared request/response queues let all 200 complete with no transport failures and exactly one winner in sync mode |
 | Starting another server destroys the active queue | `regression_tests.sh`: duplicate server; `integration_tests.sh`: crash recovery | Duplicate exits unsuccessfully; original reservation survives; stale queue can still be recovered after SIGKILL |
 | Long commands execute a truncated prefix | `regression_tests.sh`: 129-byte invalid reservation and 127-byte valid command | Reject the entire long input, preserve seat state, continue the session |
 | Overflow in a seat list accepts the valid prefix | `unit_tests.cpp`, `regression_tests.sh`: RESERVE/CANCEL in both modes | Reject overflow without changing any seat |
@@ -39,8 +39,8 @@ uploads the `results/` artifact even on failure. The Kubernetes smoke suite
 against a real cluster remains opt-in (`make test-k8s`), since it recreates the
 demo Pod.
 
-Latest local verification: 2026-09-21, working tree on
-`fix/system-regressions`: **67 checks passed** (13 unit/transaction, 3 IPC,
+Latest local verification: 2026-09-22, working tree on
+`fix/system-regressions`: **68 checks passed** (13 unit/transaction, 4 IPC,
 27 integration, 10 regression, 11 script, 3 build). The same 11 script checks
 also passed under Windows Git Bash.
 

@@ -165,7 +165,7 @@ docker exec -it airplane-reservation ./client 4
 docker exec -it airplane-reservation ./client 5
 ```
 
-แต่ละ client รับคำสั่งจาก stdin และรอ response ผ่าน reply queue ส่วนตัวของคำสั่งนั้น โดย request queue ใช้ร่วมกัน แต่ worker ส่งคำตอบกลับไปที่ `replyQueueId` ที่ระบุใน request จึงไม่แย่งพื้นที่กับ request และไม่รับคำตอบสลับกันแม้ client ID ซ้ำ
+แต่ละ client ส่งคำสั่งผ่าน shared request queue และรอคำตอบผ่าน shared response queue โดยแต่ละ request มี `requestId` ที่ไม่ซ้ำกัน และ response ใช้ค่านี้เป็น `mtype` จึงไม่แย่งพื้นที่กับ request และไม่รับคำตอบสลับกันแม้ client ID ซ้ำ
 
 ### Concurrent test บน Docker
 
@@ -251,7 +251,7 @@ QUIT
 - `nosync` ปิด mutex เพื่อสาธิต race condition
 - `worker_count` อยู่ระหว่าง 1–64 และค่าเริ่มต้นคือ 3
 
-Server ใช้ request queue ที่สร้างจาก `ftok("/ipc", 'A')` และใช้ message type `1` ส่วน response ใช้ type `1000 + client_id` ใน reply queue แยกต่างหาก Server จะล็อก `/ipc/server.lock` ก่อนจัดการ queue: เปิดซ้ำจะถูกปฏิเสธโดยไม่กระทบตัวเดิม แต่หลัง crash ยังลบ stale queue และเริ่มใหม่ได้
+Server สร้าง shared request queue จาก `ftok("/ipc", 'A')` และ shared response queue จาก `ftok("/ipc", 'B')` โดย request ใช้ message type `1` และ response ใช้ `requestId` เป็น message type Server จะล็อก `/ipc/server.lock` ก่อนจัดการทั้งสอง queue: เปิดซ้ำจะถูกปฏิเสธโดยไม่กระทบตัวเดิม แต่หลัง crash ยังลบ stale queues และเริ่มใหม่ได้
 
 ## 8. Experiment details เมื่อรัน executable โดยตรง
 
@@ -392,6 +392,6 @@ Kubernetes smoke test จะลบและสร้าง Pod `airplane-reserva
 
 - Reservation data อยู่ใน memory ของ server process เท่านั้น และจะ reset เมื่อ server restart
 - Queue lifecycle ถูกจัดการโดย System V kernel queue; ให้ใช้ container/Pod ใหม่เมื่อเปลี่ยน experiment เพื่อแยกผลการทดลอง
-- Reply queue ถูกลบเมื่อคำสั่งจบหรือ timeout แต่ถ้า client ถูก `SIGKILL` ระหว่างรอ อาจเหลือ queue จน IPC namespace ของ container/Pod ถูกลบ
+- หาก client timeout หรือถูกปิดหลัง server ประมวลผลแล้ว response ที่ไม่มีผู้รับอาจค้างใน shared response queue จน server restart; worker ส่งแบบ `IPC_NOWAIT` จึงไม่ deadlock แต่ client อื่นอาจ timeout หาก queue เต็ม
 - หลังแก้ source หรือ message format ต้อง build image ใหม่และสร้าง Pod ใหม่ทั้งชุด ห้ามผสม binary เก่ากับใหม่
 - `nosync` เป็นโหมดทดลองที่จงใจปล่อยให้เกิด race condition ไม่ควรใช้เป็น production mode
