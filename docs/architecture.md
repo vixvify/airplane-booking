@@ -15,7 +15,7 @@ flowchart LR
     Client["Client processes\n./client <client_id>"]
     LoadTest["Load test\n./load_test ..."]
     Queue[("Shared request queue: type 1")]
-    Replies[("Private reply queue per command")]
+    Replies[("Shared response queue: type = requestId")]
     Workers["Worker pool\n1 หรือ 3 threads"]
     Commands["Command parser\nLIST / STATUS / RESERVE / CANCEL / QUIT"]
     Reservation["Reservation state\n20 seats in memory"]
@@ -61,7 +61,7 @@ flowchart TB
             C5["client-5"]
         end
 
-        Queue[("System V IPC: request queue and private reply queues")]
+        Queue[("System V IPC: shared request and response queues")]
         SharedPath["emptyDir mounted at /ipc"]
 
         C1 <--> Queue
@@ -85,23 +85,22 @@ client หนึ่งตัวจะส่งทีละคำสั่ง แ
 sequenceDiagram
     participant Client as Client process
     participant Queue as Shared request queue
-    participant Reply as Private reply queue
+    participant Reply as Shared response queue
     participant Worker as Available worker
     participant Domain as Reservation state
 
-    Client->>Reply: create IPC_PRIVATE queue
-    Client->>Queue: msgsnd RequestMessage (type 1, replyQueueId)
+    Client->>Client: generate positive requestId
+    Client->>Queue: msgsnd RequestMessage (type 1, requestId)
     Worker->>Queue: msgrcv request type 1
     Worker->>Worker: parse and validate command
     Worker->>Domain: execute operation
     Domain-->>Worker: result text
-    Worker->>Reply: msgsnd ResponseMessage (type 1000 + clientId)
-    Client->>Reply: msgrcv its response type
+    Worker->>Reply: msgsnd ResponseMessage (type = requestId)
+    Client->>Reply: msgrcv type = requestId
     Reply-->>Client: response text
-    Client->>Reply: remove private queue
 ```
 
-worker ทุกตัวรออ่าน request type `1` จาก queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน response ถูกส่งไปยัง `replyQueueId` ของคำสั่งนั้น ไม่ใช้พื้นที่ request queue ร่วมกัน และแยกคำตอบแม้หลาย process ใช้ client ID เดียวกัน
+worker ทุกตัวรออ่าน request type `1` จาก request queue เดียวกัน ดังนั้น request แต่ละรายการจะถูกหยิบไปทำโดย worker ที่ว่างอยู่ ส่วน response อยู่ใน response queue อีกตัวและใช้ `requestId` เป็น `mtype` ทำให้ client รับเฉพาะคำตอบของ request นั้น แม้หลาย process ใช้ client ID เดียวกัน
 
 ### Message contract
 
@@ -109,18 +108,19 @@ worker ทุกตัวรออ่าน request type `1` จาก queue เ
 struct RequestMessage {
     long mtype;
     int clientId;
-    int replyQueueId;
+    uint64_t requestId;
     char command[128];
 };
 
 struct ResponseMessage {
     long mtype;
     int clientId;
+    uint64_t requestId;
     char response[2048];
 };
 ```
 
-request และ response ใช้คนละ struct และคนละ queue เพื่อไม่ให้ request ที่เต็ม queue ขวาง worker ตอนส่งคำตอบ โค้ดร่วมอยู่ใน `src/ipc/message_queue.cpp`: ส่ง/รับแบบ non-blocking พร้อม retry และ deadline 10 วินาที จากนั้นลบ private reply queue ด้วย RAII หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
+request และ response ใช้คนละ struct และ shared queue คนละตัว จึงไม่ใช้ capacity ก้อนเดียวกันและหลีกเลี่ยง deadlock ที่ worker ส่งคำตอบไม่ได้เพราะ request เต็ม queue โค้ดร่วมอยู่ใน `src/ipc/message_queue.cpp`: ส่ง/รับแบบ non-blocking พร้อม retry และ deadline 10 วินาที หาก timeout หลังส่ง request ผลของ operation ยังไม่แน่นอนและต้องตรวจ STATUS ก่อน retry
 
 ## 4. Server และ worker pool
 
@@ -128,13 +128,13 @@ request และ response ใช้คนละ struct และคนละ qu
 
 1. อ่าน mode (`sync` หรือ `nosync`) และจำนวน worker
 2. ขอ exclusive `flock` บน `/ipc/server.lock`; ถ้ามี server อยู่แล้วให้หยุดโดยไม่แตะ queue เดิม
-3. สร้าง key ด้วย `ftok("/ipc", 'A')` และลบเฉพาะ queue ที่ค้างหลังได้ lock แล้ว
-4. สร้าง request queue ใหม่และตั้งค่า synchronization
+3. สร้าง keys ด้วย `ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` แล้วลบเฉพาะ queues ที่ค้างหลังได้ lock
+4. สร้าง shared request/response queues ใหม่และตั้งค่า synchronization
 5. block `SIGINT`/`SIGTERM` ก่อนสร้าง threads เพื่อให้ main รับผ่าน `sigwait`
 6. สร้าง worker threads ตามจำนวนที่กำหนด (1–64)
-7. worker รับ request, ประมวลผล และส่งคำตอบไป private queue แบบไม่ block
+7. worker รับ request, ประมวลผล และส่งคำตอบไป shared response queue แบบไม่ block
 
-เมื่อ server ได้รับ `SIGINT` หรือ `SIGTERM` จะลบ request queue แล้ว join workers ก่อนปิด process และคืน server lock ส่วน worker จะออกจาก loop เมื่อ queue ถูกลบและ `msgrcv` คืน `EIDRM` หรือ `EINVAL`
+เมื่อ server ได้รับ `SIGINT` หรือ `SIGTERM` จะลบ request queue เพื่อปลุก workers, join ทุก thread แล้วลบ response queue ก่อนปิด processและคืน server lock ส่วน worker จะออกจาก loopเมื่อ `msgrcv` คืน `EIDRM` หรือ `EINVAL`
 
 จำนวน worker มีผลต่อ concurrency โดยตรง:
 
@@ -243,7 +243,7 @@ topology ของทั้ง 3 experiments เหมือนกันทั�
 
 ## 9. Load test
 
-`load_test` ใช้ message queue ชุดเดียวกับ client ปกติ แต่ใช้ thread pool ตามค่า concurrency แต่ละ request ใช้ client ID (`10000 + requestNumber`) สำหรับ ownership และมี private reply queue แยกคำตอบ
+`load_test` ใช้ shared request/response queues ชุดเดียวกับ client ปกติและใช้ thread pool ตามค่า concurrency แต่ละ request ใช้ client ID (`10000 + requestNumber`) สำหรับ ownership และมี `requestId` แยกคำตอบ
 
 รองรับ operations ต่อไปนี้:
 
@@ -304,8 +304,9 @@ sequence number บอกลำดับที่ log ถูกพิมพ์ �
 | จำนวนที่นั่ง | 20 |
 | จำนวน worker เริ่มต้น | 3 |
 | Request message type | `1` |
-| Response message type | `1000 + clientId` |
-| Queue key | `ftok("/ipc", 'A')` |
+| Request queue key | `ftok("/ipc", 'A')` |
+| Response queue key | `ftok("/ipc", 'B')` |
+| Response message type | positive `requestId` |
 | Random delay | 50-500 ms |
 | สถานะว่างภายใน array | `0` |
 
@@ -316,6 +317,6 @@ sequence number บอกลำดับที่ log ถูกพิมพ์ �
 - System V message queue เป็น IPC ภายในเครื่อง/Pod ไม่ใช่ network service
 - client ID เป็นตัวเลขที่ผู้เรียกกำหนดเอง ไม่มี authentication
 - `nosync` จงใจไม่ปลอดภัยต่อ concurrent updates และใช้เพื่อการทดลองเท่านั้น
-- client ที่ถูก SIGKILL อาจทิ้ง private reply queue ไว้จน IPC namespace ถูกลบ; กรณีจบปกติ/error/timeout จะ cleanup ด้วย RAII
+- response ของ client ที่ timeout หรือถูก `SIGKILL` อาจค้างใน shared response queue จน server restart; worker ใช้ `IPC_NOWAIT` เพื่อไม่ให้ระบบ deadlock
 - source/message contract เปลี่ยนแล้วต้อง rebuild server และ clients พร้อมกัน
 - response มีขนาดคงที่ 2048 bytes จึงเหมาะกับจำนวนที่นั่งปัจจุบัน แต่ไม่ได้ออกแบบไว้สำหรับข้อมูลขนาดใหญ่

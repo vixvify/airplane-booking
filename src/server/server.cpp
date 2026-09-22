@@ -37,6 +37,7 @@ int main(int argc, char* argv[]) {
     try {
         ipc::ServerLock serverLock;
         auto requests = ipc::MessageQueue::createRequests();
+        auto responses = ipc::MessageQueue::createResponses();
         setSynchronization(mode == "sync");
 
         sigset_t signals;
@@ -50,14 +51,17 @@ int main(int argc, char* argv[]) {
 
         std::cout << std::unitbuf
                   << "Airplane Reservation Server started\n"
-                  << "Message Queue ID: " << requests.id() << "\n"
+                  << "Request Queue ID: " << requests.id() << "\n"
+                  << "Response Queue ID: " << responses.id() << "\n"
                   << "Workers: " << workerCount << "\n"
                   << "Synchronization: " << (mode == "sync" ? "enabled" : "disabled") << "\n";
 
         std::vector<std::thread> workers;
         try {
             for (int workerId = 1; workerId <= workerCount; ++workerId) {
-                workers.emplace_back(worker, workerId, requests.id());
+                workers.emplace_back(
+                    worker, workerId, requests.id(), responses.id()
+                );
             }
             int signalNumber = 0;
             const int waitError = sigwait(&signals, &signalNumber);
@@ -76,6 +80,7 @@ int main(int argc, char* argv[]) {
         for (auto& thread : workers) {
             thread.join();
         }
+        responses.remove();
     } catch (const std::exception& error) {
         std::cerr << "ERROR: " << error.what() << "\n";
         return 1;

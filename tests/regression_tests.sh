@@ -36,7 +36,7 @@ done
 start_server sync 3
 output="$(run_load_test "queue saturation regression" 200 200 RESERVE 10)"
 assert_contains "$output" "Completed       : 200" "saturated request queue must drain"
-assert_contains "$output" "Transport Fail  : 0" "separate reply queues must prevent deadlock"
+assert_contains "$output" "Transport Fail  : 0" "separate request/response queues must prevent deadlock"
 assert_contains "$output" "Operation OK    : 1" "sync load still has exactly one winner"
 pass "200 concurrent reservations finish without IPC deadlock"
 
@@ -50,7 +50,7 @@ wait "$first"
 wait "$second"
 assert_contains "$(cat "$TEST_TMP_DIR/same-id-owner.txt")" "Seat 5 is RESERVED by Client-42" "reply routing for owner"
 assert_contains "$(cat "$TEST_TMP_DIR/same-id-free.txt")" "Seat 6 is AVAILABLE" "reply routing for available seat"
-pass "private reply queues isolate concurrent sessions with the same client ID"
+pass "request IDs isolate concurrent sessions with the same client ID"
 
 start_server sync 3
 RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$TEST_TMP_DIR" bash "$ROOT_DIR/scripts/demo1.sh"

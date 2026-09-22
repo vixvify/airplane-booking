@@ -3,7 +3,8 @@
 
 void worker(
     int workerId,
-    int messageQueueId
+    int requestQueueId,
+    int responseQueueId
 );
 
 #endif

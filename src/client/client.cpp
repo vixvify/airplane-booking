@@ -14,6 +14,7 @@ int main(int argc, char* argv[]) {
 
     try {
         auto requests = ipc::MessageQueue::openRequests();
+        auto responses = ipc::MessageQueue::openResponses();
         std::cout << std::unitbuf << "Client-" << clientId
                   << " connected. Enter commands (LIST, STATUS, RESERVE, CANCEL, QUIT).\n";
 
@@ -23,7 +24,9 @@ int main(int argc, char* argv[]) {
                 continue;
             }
             try {
-                const auto response = ipc::exchangeCommand(requests.id(), clientId, command);
+                const auto response = ipc::exchangeCommand(
+                    requests.id(), responses.id(), clientId, command
+                );
                 std::cout << response << "\n";
                 if (response == "GOODBYE") {
                     break;

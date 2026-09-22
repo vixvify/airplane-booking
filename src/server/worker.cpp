@@ -9,6 +9,8 @@
 #include <sys/msg.h>
 
 #include <cerrno>
+#include <climits>
+#include <cstdint>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -100,7 +102,8 @@ string processCommand(
 }
 void worker(
     int workerId,
-    int messageQueueId
+    int requestQueueId,
+    int responseQueueId
 ) {
 
     while (true) {
@@ -108,7 +111,7 @@ void worker(
         RequestMessage request{};
 
         ssize_t received = msgrcv(
-            messageQueueId,
+            requestQueueId,
             &request,
             sizeof(RequestMessage)
                 - sizeof(long),
@@ -128,7 +131,8 @@ void worker(
         }
 
         if (received != sizeof(RequestMessage) - sizeof(long)
-            || request.clientId <= 0 || request.replyQueueId < 0
+            || request.clientId <= 0 || request.requestId == 0
+            || request.requestId > static_cast<std::uint64_t>(LONG_MAX)
             || std::memchr(request.command, '\0', sizeof(request.command)) == nullptr) {
             continue;
         }
@@ -153,12 +157,11 @@ void worker(
 
         ResponseMessage response{};
 
-        response.mtype =
-            Constants::RESPONSE_TYPE_BASE
-            + request.clientId;
+        response.mtype = static_cast<long>(request.requestId);
 
         response.clientId =
             request.clientId;
+        response.requestId = request.requestId;
 
         strncpy(
             response.response,
@@ -172,7 +175,7 @@ void worker(
 
         if (
             msgsnd(
-                request.replyQueueId,
+                responseQueueId,
                 &response,
                 sizeof(ResponseMessage)
                     - sizeof(long),
