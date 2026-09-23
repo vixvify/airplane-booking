@@ -25,6 +25,8 @@ jobs:
           docker run --name reservation-ci \
             -v "$PWD/results:/app/results" \
             airplane-reservation:ci timeout 300s bash scripts/test.sh
+      - name: Compose experiment smoke tests
+        run: make test-compose
       - name: Save container output
         if: always()
         run: |

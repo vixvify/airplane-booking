@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_SUITE=integration
 source "$(dirname "${BASH_SOURCE[0]}")/test_helpers.sh"
 
 echo "Running command-line validation tests"

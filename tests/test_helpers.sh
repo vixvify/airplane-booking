@@ -6,12 +6,18 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
-TEST_TMP_DIR="$(mktemp -d "$RESULTS_DIR/tests-XXXXXXXX")"
+source "$ROOT_DIR/scripts/lib/result_paths.sh"
+TEST_SUITE="${TEST_SUITE:-${0##*/}}"
+TEST_SUITE="${TEST_SUITE%.sh}"
+TEST_TMP_DIR="$(create_result_dir tests "$TEST_SUITE")"
 echo "Test evidence: $TEST_TMP_DIR"
 SERVER_PID=""
 SERVER_LOG=""
 SERVER_START_COUNT=0
 PASS_COUNT=0
+CLIENT_CALL_COUNT=0
+FAILURE_CALL_COUNT=0
+LOAD_CALL_COUNT=0
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -85,7 +91,8 @@ run_client() {
   local commands="$2"
 
   local record
-  record="$(mktemp "$TEST_TMP_DIR/client-$client_id-XXXXXXXX.txt")"
+  CLIENT_CALL_COUNT=$((CLIENT_CALL_COUNT + 1))
+  record="$TEST_TMP_DIR/client-$client_id-$(printf '%03d' "$CLIENT_CALL_COUNT").log"
   printf '%s' "$commands" >"$record.commands.txt"
   printf '%s' "$commands" | "$ROOT_DIR/client" "$client_id" 2>&1 | tee "$record"
 }
@@ -96,7 +103,7 @@ start_server() {
 
   stop_server
   SERVER_START_COUNT=$((SERVER_START_COUNT + 1))
-  SERVER_LOG="$TEST_TMP_DIR/server-$SERVER_START_COUNT.txt"
+  SERVER_LOG="$TEST_TMP_DIR/server-$(printf '%02d' "$SERVER_START_COUNT").log"
 
   "$ROOT_DIR/server" "$mode" "$workers" >"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
@@ -120,7 +127,8 @@ expect_failure() {
   local description="$1"
   shift
   local record
-  record="$(mktemp "$TEST_TMP_DIR/expected-failure-XXXXXXXX.txt")"
+  FAILURE_CALL_COUNT=$((FAILURE_CALL_COUNT + 1))
+  record="$TEST_TMP_DIR/expected-failure-$(printf '%02d' "$FAILURE_CALL_COUNT").log"
   printf '%s\n' "$description" >"$record"
   if "$@" >>"$record" 2>&1; then
     fail "$description should return a non-zero status"
@@ -133,7 +141,8 @@ run_load_test() {
   local description="$1"
   shift
   local output_file
-  output_file="$(mktemp "$TEST_TMP_DIR/load-XXXXXXXX.txt")"
+  LOAD_CALL_COUNT=$((LOAD_CALL_COUNT + 1))
+  output_file="$TEST_TMP_DIR/load-test-$(printf '%02d' "$LOAD_CALL_COUNT").log"
 
   if ! timeout 30s "$ROOT_DIR/load_test" "$@" >"$output_file" 2>&1; then
     cat "$output_file" >&2 || true
@@ -145,7 +154,7 @@ run_load_test() {
 
 run_concurrent_reserve() {
   local seat_id="$1"
-  local output_dir="$TEST_TMP_DIR/concurrent-$SERVER_START_COUNT"
+  local output_dir="$TEST_TMP_DIR/concurrent-server-$(printf '%02d' "$SERVER_START_COUNT")"
   local pids=()
 
   mkdir -p "$output_dir"
@@ -153,7 +162,7 @@ run_concurrent_reserve() {
   for client_id in 1 2 3 4 5; do
     (
       run_client "$client_id" "RESERVE $seat_id"$'\n' \
-        >"$output_dir/client-$client_id.txt" 2>&1
+        >"$output_dir/client-$client_id.log" 2>&1
     ) &
     pids+=("$!")
   done
@@ -164,7 +173,7 @@ run_concurrent_reserve() {
     fi
   done
 
-  cat "$output_dir"/*.txt
+  cat "$output_dir"/*.log
 }
 
 count_successes() {
