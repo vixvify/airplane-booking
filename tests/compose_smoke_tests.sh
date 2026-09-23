@@ -81,7 +81,14 @@ command_output="$(
   printf 'STATUS 1\nRESERVE 1 2\nSTATUS 1\nCANCEL 1 2\nSTATUS 1\nQUIT\n' |
     bash "$ROOT_DIR/scripts/compose.sh" exec -T client-1 ./client 1
 )"
-for expected in +  "Seat 1 is AVAILABLE" +  "SUCCESS: Seat 1 reserved" +  "SUCCESS: Seat 2 reserved" +  "Seat 1 is RESERVED by Client-1" +  "SUCCESS: Seat 1 cancelled" +  "SUCCESS: Seat 2 cancelled" +  "GOODBYE"; do
+for expected in \
+  "Seat 1 is AVAILABLE" \
+  "SUCCESS: Seat 1 reserved" \
+  "SUCCESS: Seat 2 reserved" \
+  "Seat 1 is RESERVED by Client-1" \
+  "SUCCESS: Seat 1 cancelled" \
+  "SUCCESS: Seat 2 cancelled" \
+  "GOODBYE"; do
   [[ "$command_output" == *"$expected"* ]] || fail "Compose client flow missed: $expected"
 done
 pass "Compose command lifecycle"

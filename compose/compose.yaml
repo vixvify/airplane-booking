@@ -9,6 +9,7 @@ services:
 
   client-1: &client
     image: airplane-reservation:latest
+    build: ..
     command: ["sleep", "infinity"]
     ipc: "service:server"
     volumes:
