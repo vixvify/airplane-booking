@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+TEST_SUITE=regression
 source "$(dirname "${BASH_SOURCE[0]}")/test_helpers.sh"
 
 start_server sync 3
@@ -53,10 +54,14 @@ assert_contains "$(cat "$TEST_TMP_DIR/same-id-free.txt")" "Seat 6 is AVAILABLE" 
 pass "request IDs isolate concurrent sessions with the same client ID"
 
 start_server sync 3
-RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$TEST_TMP_DIR" bash "$ROOT_DIR/scripts/demo1.sh"
+demo_output="$(RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$RESULTS_DIR" bash "$ROOT_DIR/scripts/demo1.sh")"
+assert_contains "$demo_output" "Successful reservations: 5/5" "Demo 1 report should identify all reserved seats"
+assert_contains "$demo_output" "Successful cancellations: 5/5" "Demo 1 report should identify all cancellations"
 pass "Demo 1 runs five mixed-command clients and validates results"
 start_server sync 1
-RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$TEST_TMP_DIR" bash "$ROOT_DIR/scripts/concurrent-test.sh"
-pass "concurrent test works without Kubernetes"
+concurrent_output="$(RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$RESULTS_DIR" bash "$ROOT_DIR/scripts/concurrent-test.sh")"
+assert_contains "$concurrent_output" "Successful reservations: 1/5" "concurrent report should identify its winner"
+assert_contains "$concurrent_output" "client-" "concurrent report should list clients"
+pass "concurrent test works with local runtime"
 stop_server
 echo "Regression tests: $PASS_COUNT passed, 0 failed"

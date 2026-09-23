@@ -5,6 +5,7 @@
 /client
 /load_test
 /tests/bin/
-/results/
+/results/*
+!/results/README.md
 
 .vscode/

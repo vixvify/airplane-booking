@@ -2,10 +2,11 @@
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT_DIR/scripts/lib/runtime.sh"
+source "$ROOT_DIR/scripts/lib/result_paths.sh"
 RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
-RUN_DIR="$(mktemp -d "$RESULTS_DIR/$DEMO_NAME-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXXXX")"
+RUN_DIR="$(create_result_dir demos "$DEMO_NAME")"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
 LOG_PID=""
 READER_PID=""
@@ -37,17 +38,17 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "Evidence: $RUN_DIR"
-printf 'demo=%s\nstarted_at=%s\nruntime=%s\npod=%s\ncontainer=%s\n' \
-  "$DEMO_NAME" "$STARTED_AT" "${RUNTIME:-k8s}" "${POD_NAME:-airplane-reservation}" \
-  "${CONTAINER_NAME:-}" >"$RUN_DIR/summary.txt"
+printf 'demo=%s\nstarted_at=%s\nruntime=%s\nexperiment=%s\nproject=%s\n' \
+  "$DEMO_NAME" "$STARTED_AT" "${RUNTIME:-compose}" "${COMPOSE_EXPERIMENT:-nosync}" \
+  "${COMPOSE_PROJECT_NAME:-$(basename "$ROOT_DIR")}" >"$RUN_DIR/summary.txt"
 git -C "$ROOT_DIR" rev-parse HEAD >>"$RUN_DIR/summary.txt" 2>/dev/null || true
 init_runtime
 LOCAL_LOG_START=1
 if [ "$RUNTIME" = local ]; then LOCAL_LOG_START=$(( $(wc -c <"$SERVER_LOG") + 1 )); fi
 # Fail early if logging itself is unavailable, before issuing mutations.
-runtime_log_snapshot >"$RUN_DIR/server.txt" 2>&1
-: >"$RUN_DIR/server-live.txt"
-runtime_live_logs >"$RUN_DIR/server-live.txt" 2>&1 &
+  runtime_log_snapshot >"$RUN_DIR/server.log" 2>&1
+: >"$RUN_DIR/server-live.log"
+runtime_live_logs >"$RUN_DIR/server-live.log" 2>&1 &
 LOG_PID=$!
 # Poll a regular file rather than a FIFO (Git Bash on Windows has no mkfifo).
 display_logs() {
@@ -66,25 +67,80 @@ display_logs() {
     fi
   done
 }
-display_logs <"$RUN_DIR/server-live.txt" &
+display_logs <"$RUN_DIR/server-live.log" &
 READER_PID=$!
 
 run_client() {
   local id="$1" commands="$2"
-  printf '%s' "$commands" >"$RUN_DIR/client-$id-commands.txt"
+  mkdir -p "$RUN_DIR/clients/client-$id"
+  printf '%s' "$commands" >"$RUN_DIR/clients/client-$id/commands.txt"
   printf '%s' "$commands" | runtime_client "$id" 2>&1 \
-    | tee "$RUN_DIR/client-$id.txt" \
+    | tee "$RUN_DIR/clients/client-$id/output.log" \
     | while IFS= read -r line; do printf '[CLIENT-%s] %s\n' "$id" "$line"; done
+}
+
+write_report() {
+  local report="$RUN_DIR/report.txt"
+  local id seat file reserve_status cancel_status reserve_reason
+  local reserved_count=0 failed_count=0 cancelled_count=0
+
+  if [ "$DEMO_NAME" = demo1 ]; then
+    printf 'Reservation result report\nExperiment: %s\n\n' \
+      "${COMPOSE_EXPERIMENT:-nosync}" >"$report"
+    printf '%-10s | %-34s | %s\n' 'Client' 'Reservation' 'Cancellation' >>"$report"
+    printf '%s\n' '-----------|------------------------------------|-------------' >>"$report"
+  else
+    printf 'Concurrent reservation result report\nExperiment: %s\nTarget seat: %s\n\n' \
+      "${COMPOSE_EXPERIMENT:-nosync}" "$SEAT_ID" >"$report"
+    printf '%-10s | %s\n' 'Client' 'Reservation' >>"$report"
+    printf '%s\n' '-----------|----------------------------------------------' >>"$report"
+  fi
+
+  for id in 1 2 3 4 5; do
+    file="$RUN_DIR/clients/client-$id/output.log"
+    if [ "$DEMO_NAME" = demo1 ]; then seat="$id"; else seat="$SEAT_ID"; fi
+
+    if grep -Fqx "SUCCESS: Seat $seat reserved" "$file"; then
+      reserve_status="SUCCESS (Seat $seat)"
+      reserved_count=$((reserved_count + 1))
+    else
+      reserve_reason="$(grep -m1 '^FAILED:' "$file" | sed 's/^FAILED: //' || true)"
+      reserve_status="FAILED${reserve_reason:+: $reserve_reason}"
+      failed_count=$((failed_count + 1))
+    fi
+
+    if [ "$DEMO_NAME" = demo1 ]; then
+      if grep -Fqx "SUCCESS: Seat $seat cancelled" "$file"; then
+        cancel_status="SUCCESS"
+        cancelled_count=$((cancelled_count + 1))
+      else
+        cancel_status="FAILED"
+      fi
+      printf '%-10s | %-34s | %s\n' "client-$id" "$reserve_status" "$cancel_status" >>"$report"
+    else
+      printf '%-10s | %s\n' "client-$id" "$reserve_status" >>"$report"
+    fi
+  done
+
+  printf '\nSuccessful reservations: %s/5\nFailed reservations: %s/5\n' \
+    "$reserved_count" "$failed_count" >>"$report"
+  if [ "$DEMO_NAME" = demo1 ]; then
+    printf 'Successful cancellations: %s/5\n' "$cancelled_count" >>"$report"
+  fi
+
+  cat "$report"
+  echo "Report saved in: $report"
 }
 
 if [ "$DEMO_NAME" = demo1 ]; then
   echo "Demo 1: five clients, mixed commands (seats 1-5 must be available)."
-  printf 'LIST\nQUIT\n' | runtime_client 1 >"$RUN_DIR/preflight.txt"
+  mkdir -p "$RUN_DIR/preflight"
+  printf 'LIST\nQUIT\n' | runtime_client 1 >"$RUN_DIR/preflight/list.log"
   for id in 1 2 3 4 5; do
     # Check through STATUS so preconditions do not depend on LIST formatting.
-    printf 'STATUS %s\nQUIT\n' "$id" | runtime_client "$id" >"$RUN_DIR/preflight-$id.txt"
-    grep -q "Seat $id is AVAILABLE" "$RUN_DIR/preflight-$id.txt" || {
-      echo "Seat $id is already reserved; start a fresh server/pod for Demo 1." >&2; exit 1;
+    printf 'STATUS %s\nQUIT\n' "$id" | runtime_client "$id" >"$RUN_DIR/preflight/client-$id.log"
+    grep -q "Seat $id is AVAILABLE" "$RUN_DIR/preflight/client-$id.log" || {
+      echo "Seat $id is already reserved; restart the server before Demo 1." >&2; exit 1;
     }
   done
   commands=(
@@ -117,10 +173,11 @@ if ! kill -0 "$LOG_PID" 2>/dev/null; then
 fi
 stop_logs
 # A final bounded snapshot also captures the last lines if the live stream lagged.
-if ! runtime_log_snapshot >"$RUN_DIR/server.txt" 2>&1; then failed=1; fi
+if ! runtime_log_snapshot >"$RUN_DIR/server.log" 2>&1; then failed=1; fi
+write_report
 
 for id in 1 2 3 4 5; do
-  file="$RUN_DIR/client-$id.txt"
+  file="$RUN_DIR/clients/client-$id/output.log"
   grep -q '^GOODBYE$' "$file" || failed=1
   if [ "$DEMO_NAME" = demo1 ]; then
     grep -q "^SUCCESS: Seat $id reserved" "$file" || failed=1
@@ -136,4 +193,4 @@ else
   echo "Concurrent reservation test finished."
   echo "Operation failures are expected under contention; compare winners in client logs."
 fi
-echo "Saved commands, client output, server logs and summary: $RUN_DIR"
+echo "Saved results in: $RUN_DIR (see summary.txt, server.log, server-live.log, and clients/)"

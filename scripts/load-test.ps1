@@ -16,8 +16,7 @@ param(
     [ValidateRange(1, 20)]
     [Nullable[int]]$SeatId,
 
-    [string]$PodName = "airplane-reservation",
-    [string]$ContainerName = "client-1",
+    [string]$ClientService = "client-1",
     [string]$ResultsDirectory
 )
 
@@ -28,35 +27,75 @@ if ([string]::IsNullOrWhiteSpace($ResultsDirectory)) {
 }
 $ResultsDirectory = [System.IO.Path]::GetFullPath($ResultsDirectory)
 New-Item -ItemType Directory -Force -Path $ResultsDirectory | Out-Null
+$loadTestsDirectory = Join-Path $ResultsDirectory "load-tests"
+New-Item -ItemType Directory -Force -Path $loadTestsDirectory | Out-Null
 
-$timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$runId = [Guid]::NewGuid().ToString("N").Substring(0, 8)
-$runDirectory = Join-Path $ResultsDirectory "load-$timestamp-$runId"
+$timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd_HH-mm-ss-fff") + "Z"
+$runDirectory = Join-Path $loadTestsDirectory $timestamp
+$suffix = 2
+while (Test-Path -LiteralPath $runDirectory) {
+    $runDirectory = Join-Path $loadTestsDirectory "$timestamp-$suffix"
+    $suffix++
+}
 New-Item -ItemType Directory -Path $runDirectory | Out-Null
 
-$resultFile = Join-Path $runDirectory "load-test.txt"
-$serverLogFile = Join-Path $runDirectory "server-log.txt"
+$resultFile = Join-Path $runDirectory "output.log"
+$serverLogFile = Join-Path $runDirectory "server.log"
 $summaryFile = Join-Path $runDirectory "summary.txt"
 $startedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffffffZ")
 $loadExitCode = 1
 $serverLogExitCode = 1
 $failure = $null
-$kubectl = $null
+$detectedExperiment = "unknown"
+$docker = $null
+$composeArgs = @()
 
 try {
-    $kubectlCommand = Get-Command kubectl -ErrorAction Stop
-    $kubectl = $kubectlCommand.Source
-
-    $podStatus = & $kubectl get pod $PodName 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $podStatus | Set-Content -Path $resultFile -Encoding UTF8
-        $failure = "Cannot access pod '$PodName'."
+    $dockerCommand = Get-Command docker -ErrorAction Stop
+    $docker = $dockerCommand.Source
+    $projectDirectory = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+    $composeDirectory = Join-Path $projectDirectory "compose"
+    $projectName = if ([string]::IsNullOrWhiteSpace($env:COMPOSE_PROJECT_NAME)) {
+        Split-Path -Leaf $projectDirectory
+    } else {
+        $env:COMPOSE_PROJECT_NAME
+    }
+    $composeArgs = @(
+        "compose", "--project-directory", $composeDirectory,
+        "--project-name", $projectName,
+        "-f", (Join-Path $composeDirectory "compose.yaml")
+    )
+    $services = & $docker @composeArgs ps --status running --services 2>&1
+    if (($LASTEXITCODE -ne 0) -or ($services -notcontains "server")) {
+        $services | Set-Content -Path $resultFile -Encoding UTF8
+        $failure = "Compose server is not running for project '$projectName'. Start the desired experiment first."
     }
     else {
+        $serverContainerId = & $docker @composeArgs ps --quiet server
+        if (($LASTEXITCODE -ne 0) -or [string]::IsNullOrWhiteSpace($serverContainerId)) {
+            throw "Cannot find the running Compose server container."
+        }
+
+        $serverDetails = & $docker inspect $serverContainerId | ConvertFrom-Json
+        $serverCommand = @($serverDetails[0].Config.Cmd)
+        $serverConfiguration = if ($serverCommand.Count -ge 3) {
+            "$($serverCommand[1]) $($serverCommand[2])"
+        } else {
+            ""
+        }
+        $experimentByConfiguration = @{
+            "sync 1" = "sequential"
+            "nosync 3" = "nosync"
+            "sync 3" = "sync"
+        }
+        if (-not $experimentByConfiguration.ContainsKey($serverConfiguration)) {
+            throw "Cannot detect experiment from running server command '$($serverCommand -join ' ')'. Expected sync 1, nosync 3, or sync 3."
+        }
+        $detectedExperiment = $experimentByConfiguration[$serverConfiguration]
+        Write-Host "Detected running experiment: $detectedExperiment"
+
         $arguments = @(
-            "exec", $PodName,
-            "-c", $ContainerName,
-            "--", "./load_test",
+            "exec", "-T", $ClientService, "./load_test",
             $TotalRequests.ToString(),
             $Concurrency.ToString(),
             $Operation
@@ -67,7 +106,7 @@ try {
         }
 
         Write-Host "Saving load-test evidence to: $runDirectory"
-        & $kubectl @arguments 2>&1 |
+        & $docker @composeArgs @arguments 2>&1 |
             Tee-Object -FilePath $resultFile
         $loadExitCode = $LASTEXITCODE
 
@@ -82,13 +121,13 @@ catch {
 }
 finally {
     try {
-        if ($null -ne $kubectl) {
-            & $kubectl logs $PodName -c server "--since-time=$startedAt" 2>&1 |
+        if ($null -ne $docker) {
+            & $docker @composeArgs logs --since $startedAt --timestamps server 2>&1 |
                 Set-Content -Path $serverLogFile -Encoding UTF8
             $serverLogExitCode = $LASTEXITCODE
         }
         else {
-            "kubectl was not found." |
+            "Docker was not found." |
                 Set-Content -Path $serverLogFile -Encoding UTF8
         }
     }
@@ -103,12 +142,14 @@ finally {
     @(
         "started_at=$startedAt"
         "finished_at=$((Get-Date).ToUniversalTime().ToString('o'))"
-        "pod=$PodName"
-        "container=$ContainerName"
+        "experiment=$detectedExperiment"
+        "client_service=$ClientService"
         "total_requests=$TotalRequests"
         "concurrency=$Concurrency"
         "operation=$Operation"
         "seat_id=$seatDescription"
+        "load_output=output.log"
+        "server_log=server.log"
         "load_exit_code=$loadExitCode"
         "server_log_exit_code=$serverLogExitCode"
     ) | Set-Content -Path $summaryFile -Encoding UTF8

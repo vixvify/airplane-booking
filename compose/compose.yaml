@@ -1,0 +1,30 @@
+services:
+  server:
+    image: airplane-reservation:latest
+    build: ..
+    command: ["./server", "nosync", "3"]
+    ipc: shareable
+    volumes:
+      - reservation-ipc:/ipc
+
+  client-1: &client
+    image: airplane-reservation:latest
+    build: ..
+    command: ["sleep", "infinity"]
+    ipc: "service:server"
+    volumes:
+      - reservation-ipc:/ipc
+    depends_on:
+      - server
+
+  client-2:
+    <<: *client
+  client-3:
+    <<: *client
+  client-4:
+    <<: *client
+  client-5:
+    <<: *client
+
+volumes:
+  reservation-ipc:
