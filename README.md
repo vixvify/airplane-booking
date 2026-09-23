@@ -291,6 +291,41 @@ Server สร้าง shared request queue จาก `ftok("/ipc", 'A')` แล
 
 ## 9. Load test
 
+### PowerShell: รันและเก็บผลเป็น TXT อัตโนมัติ
+
+บน Windows แนะนำให้ใช้ wrapper นี้แทนการเรียก `kubectl exec` โดยตรง:
+
+```powershell
+.\scripts\load-test.ps1 50000 100 RESERVE 10
+```
+
+argument ตามลำดับคือ `total_requests`, `concurrency`, `operation` และ `seat_id` โดย `seat_id` ไม่จำเป็นสำหรับ `STATUS` และถ้าไม่ใส่ ระบบจะวนใช้ที่นั่ง 1-20
+
+ทุกครั้งที่รัน สคริปต์จะแสดงผล load test แบบสดใน terminal และสร้างโฟลเดอร์ใหม่เพื่อไม่ให้ทับผลเก่า:
+
+```text
+results/load-<timestamp>-<id>/
+├── load-test.txt
+├── server-log.txt
+└── summary.txt
+```
+
+- `load-test.txt`: output และผลสรุปจากโปรแกรม `load_test`
+- `server-log.txt`: log ของ server ตั้งแต่เวลาเริ่มทดสอบครั้งนั้น
+- `summary.txt`: argument, เวลาเริ่ม/จบ และ exit code สำหรับตรวจว่าการทดสอบสำเร็จหรือไม่
+
+ตัวอย่าง:
+
+```powershell
+.\scripts\load-test.ps1 1000 20 STATUS
+.\scripts\load-test.ps1 1000 20 RESERVE
+.\scripts\load-test.ps1 1000 20 CANCEL 10
+```
+
+แม้ load test หรือการเก็บ server log ล้มเหลว สคริปต์จะยังเก็บหลักฐานที่ได้ไว้ในโฟลเดอร์รอบนั้น และคืน exit code ที่ไม่ใช่ศูนย์
+
+### รัน executable โดยตรง
+
 `load_test` เป็นคนละส่วนกับ `concurrent-test.sh` โดยส่ง `STATUS`, `RESERVE` หรือ `CANCEL` requests จำนวนมากแบบ concurrent และรายงาน completion rate, ผลลัพธ์ของ operation, throughput และ average latency ต้องมี Pod กำลังทำงานอยู่ก่อน และรันใน client container ใดก็ได้:
 
 ```bash
