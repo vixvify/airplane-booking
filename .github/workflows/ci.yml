@@ -26,7 +26,9 @@ jobs:
             -v "$PWD/results:/app/results" \
             airplane-reservation:ci timeout 300s bash scripts/test.sh
       - name: Compose experiment smoke tests
-        run: make test-compose
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" results
+          make test-compose
       - name: Save container output
         if: always()
         run: |
