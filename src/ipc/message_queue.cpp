@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cerrno>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -78,7 +79,7 @@ void waitForRetry(std::chrono::steady_clock::time_point deadline, const char* me
     if (std::chrono::steady_clock::now() >= deadline) {
         throw std::runtime_error(message);
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
 }
 
 }
@@ -152,8 +153,10 @@ std::string exchangeCommand(
 
     ResponseMessage response{};
 
-    while (msgrcv(responseQueueId, &response, sizeof(response) - sizeof(long),
-                  responseType, IPC_NOWAIT) == -1) {
+    ssize_t receivedBytes;
+    while ((receivedBytes = msgrcv(responseQueueId, &response,
+                                  sizeof(response) - sizeof(long),
+                                  responseType, IPC_NOWAIT)) == -1) {
         if (errno != ENOMSG && errno != EINTR) {
             fail("receive response");
         }
@@ -161,11 +164,16 @@ std::string exchangeCommand(
             "response timeout (operation outcome unknown; check STATUS before retrying)");
     }
 
+    const size_t headerBytes = offsetof(ResponseMessage, response) - sizeof(long);
+    if (receivedBytes <= static_cast<ssize_t>(headerBytes)
+        || memchr(response.response, '\0', receivedBytes - headerBytes) == nullptr) {
+        throw std::runtime_error("invalid response payload");
+    }
+
     if (response.clientId != clientId || response.requestId != request.requestId) {
         throw std::runtime_error("response correlation mismatch");
     }
     
-    response.response[sizeof(response.response) - 1] = '\0';
     return response.response;
 }
 

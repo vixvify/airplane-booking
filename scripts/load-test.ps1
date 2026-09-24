@@ -47,6 +47,7 @@ $loadExitCode = 1
 $serverLogExitCode = 1
 $failure = $null
 $detectedExperiment = "unknown"
+$detectedLogMode = "unknown"
 $docker = $null
 $composeArgs = @()
 
@@ -93,6 +94,15 @@ try {
         }
         $detectedExperiment = $experimentByConfiguration[$serverConfiguration]
         Write-Host "Detected running experiment: $detectedExperiment"
+        $logModeEntry = @($serverDetails[0].Config.Env) |
+            Where-Object { $_ -like "AIRPLANE_LOG_MODE=*" } |
+            Select-Object -Last 1
+        $detectedLogMode = if ($logModeEntry) {
+            $logModeEntry.Substring("AIRPLANE_LOG_MODE=".Length)
+        } else {
+            "verbose"
+        }
+        Write-Host "Detected server logging: $detectedLogMode"
 
         $arguments = @(
             "exec", "-T", $ClientService, "./load_test",
@@ -143,6 +153,7 @@ finally {
         "started_at=$startedAt"
         "finished_at=$((Get-Date).ToUniversalTime().ToString('o'))"
         "experiment=$detectedExperiment"
+        "log_mode=$detectedLogMode"
         "client_service=$ClientService"
         "total_requests=$TotalRequests"
         "concurrency=$Concurrency"

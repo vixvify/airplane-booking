@@ -108,4 +108,15 @@ demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
   fail "Demo 1 report should show five successful cancellations"
 pass "Compose Demo 1 mixed commands"
 
+export AIRPLANE_LOG_MODE=quiet
+start_experiment sync
+quiet_output="$(bash "$ROOT_DIR/scripts/compose.sh" exec -T client-1 ./load_test 1000 20 STATUS)"
+[[ "$quiet_output" == *"Operation OK    : 1000"* ]] ||
+  fail "quiet benchmark mode should still process requests"
+quiet_logs="$(bash "$ROOT_DIR/scripts/compose.sh" logs server)"
+[[ "$quiet_logs" != *"[SEQ "* ]] ||
+  fail "quiet benchmark mode should suppress per-request logs"
+unset AIRPLANE_LOG_MODE
+pass "quiet benchmark mode preserves requests without per-request logs"
+
 echo "Compose smoke tests: $PASS_COUNT passed, 0 failed"
