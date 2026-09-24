@@ -4,6 +4,8 @@ services:
     build: ..
     command: ["./server", "nosync", "3"]
     ipc: shareable
+    environment:
+      AIRPLANE_LOG_MODE: ${AIRPLANE_LOG_MODE:-verbose}
     volumes:
       - reservation-ipc:/ipc
 

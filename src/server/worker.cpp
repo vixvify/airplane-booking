@@ -11,6 +11,7 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -134,12 +135,16 @@ void worker(
         );
         response.response[sizeof(response.response) - 1] = '\0';
 
+        const size_t responseBytes =
+            offsetof(ResponseMessage, response) - sizeof(long)
+            + strlen(response.response) + 1;
+
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (
             msgsnd(
                 responseQueueId,
                 &response,
-                sizeof(ResponseMessage) - sizeof(long),
+                responseBytes,
                 IPC_NOWAIT
             ) == -1
         ) {

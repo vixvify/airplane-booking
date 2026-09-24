@@ -158,6 +158,25 @@ bash scripts/compose.sh exec -T client-1 ./load_test 1000 20 STATUS
 
 `load_test` แยก transport failure ออกจาก operation failure และใช้ client IDs กับ seat mapping แบบคงที่ หากทดสอบ `CANCEL` ให้ส่ง `RESERVE` ชุดเดียวกันก่อน เพื่อให้ request ใช้ owner และ seat mapping เดิม
 
+### วัด latency / throughput โดยไม่ให้ log บิดผล
+
+ค่าเริ่มต้นของ server คือ `AIRPLANE_LOG_MODE=verbose` ซึ่งบันทึกหลายบรรทัดต่อ request เพื่อดูการทำงานของ workers ใน demo หากต้องการวัดความเร็ว ให้รัน Compose project แยกและใช้ `quiet` (ปิดเฉพาะ log ราย request; ข้อความเริ่ม server และผลจาก `load_test` ยังแสดงตามปกติ):
+
+```powershell
+$env:COMPOSE_PROJECT_NAME = "airplane-perf"
+$env:COMPOSE_EXPERIMENT = "sync"
+$env:AIRPLANE_LOG_MODE = "quiet"
+& "$env:ProgramFiles\Git\bin\bash.exe" scripts/compose.sh up -d --build
+.\scripts\load-test.ps1 1000000 100 STATUS
+.\scripts\load-test.ps1 50000 100 RESERVE 10
+& "$env:ProgramFiles\Git\bin\bash.exe" scripts/compose.sh down
+Remove-Item Env:COMPOSE_PROJECT_NAME, Env:AIRPLANE_LOG_MODE
+```
+
+ใช้ชื่อ Compose project ที่ยังไม่มีข้อมูลสำคัญอยู่: คำสั่ง `down` หยุดเฉพาะ project นั้น และการเริ่ม server ใหม่จะรีเซ็ตสถานะที่นั่งใน memory `summary.txt` บันทึก `log_mode` ด้วย อย่าเทียบผล `verbose` กับ `quiet` เป็น workload เดียวกัน และ `RESERVE 10` ซ้ำ ๆ จะมีคำขอสำเร็จเพียงครั้งเดียว (หรือไม่มีเลยหากที่นั่งถูกจองแล้ว) ค่า latency ขึ้นกับเครื่องและ Docker Desktop ไม่ได้รับประกันว่าจะต่ำกว่า 1 ms ทุกสภาพแวดล้อม
+
+`quiet` ไม่ได้ปิด `randomDelay()` 50–500 ms ของการจองที่สำเร็จ เพราะ delay นี้ใช้แสดงการแข่งขันระหว่าง workers ดังนั้นค่าเฉลี่ยต่ำกว่า 1 ms ในการยิง `RESERVE 10` ซ้ำ ๆ เป็นผลของคำขอที่จองไม่สำเร็จเกือบทั้งหมด ไม่ใช่ latency ของการจองสำเร็จ
+
 ## หลักการ IPC ใน Compose
 
 service `server` ใช้ IPC namespace แบบ shareable ส่วน services `client-1` ถึง `client-5` ใช้ namespace เดียวกับ server ผ่าน Compose `ipc: service:server` ทุก service mount named volume เดียวกันที่ `/ipc` เพื่อให้ `ftok("/ipc", 'A')` สร้าง key ตรงกัน

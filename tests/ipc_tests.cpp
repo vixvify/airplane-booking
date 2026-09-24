@@ -4,6 +4,7 @@
 
 #include <sys/msg.h>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <exception>
 #include <iostream>
@@ -122,9 +123,11 @@ int main() {
                 require(
                     msgsnd(
                         responses.id(), &expected,
-                        sizeof(expected) - sizeof(long), 0
+                        offsetof(ResponseMessage, response) - sizeof(long)
+                            + std::strlen(expected.response) + 1,
+                        0
                     ) == 0,
-                    "test worker could not send expected response"
+                    "test worker could not send compact response"
                 );
             } catch (...) {
                 workerError = std::current_exception();
@@ -155,6 +158,33 @@ int main() {
             "unexpected response remained in the queue"
         );
         std::cout << "[PASS] request ID routes responses on a shared queue\n";
+
+        // A shortened response is valid only if its transmitted text is NUL-terminated.
+        std::thread malformedWorker([&] {
+            RequestMessage request{};
+            if (msgrcv(requests.id(), &request,
+                       sizeof(request) - sizeof(long),
+                       Constants::REQUEST_TYPE, 0) < 0) {
+                return;
+            }
+            ResponseMessage malformed{};
+            malformed.mtype = static_cast<long>(request.requestId);
+            malformed.clientId = request.clientId;
+            malformed.requestId = request.requestId;
+            std::memcpy(malformed.response, "BAD", 3);
+            msgsnd(responses.id(), &malformed,
+                   offsetof(ResponseMessage, response) - sizeof(long) + 3, 0);
+        });
+        bool invalidPayloadRejected = false;
+        try {
+            ipc::exchangeCommand(requests.id(), responses.id(), 7, "STATUS 7",
+                                 std::chrono::milliseconds(500));
+        } catch (const std::runtime_error& error) {
+            invalidPayloadRejected = std::strstr(error.what(), "invalid response payload") != nullptr;
+        }
+        malformedWorker.join();
+        require(invalidPayloadRejected, "response without a NUL terminator must be rejected");
+        std::cout << "[PASS] malformed compact response is rejected\n";
 
         bool rejected = false;
         try {
