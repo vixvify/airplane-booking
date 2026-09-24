@@ -38,11 +38,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "Evidence: $RUN_DIR"
-printf 'demo=%s\nstarted_at=%s\nruntime=%s\nexperiment=%s\nproject=%s\n' \
-  "$DEMO_NAME" "$STARTED_AT" "${RUNTIME:-compose}" "${COMPOSE_EXPERIMENT:-nosync}" \
-  "${COMPOSE_PROJECT_NAME:-$(basename "$ROOT_DIR")}" >"$RUN_DIR/summary.txt"
-git -C "$ROOT_DIR" rev-parse HEAD >>"$RUN_DIR/summary.txt" 2>/dev/null || true
 init_runtime
+printf 'demo=%s\nstarted_at=%s\nruntime=%s\nexperiment=%s\nworkers=%s\ncontainer=%s\n' \
+  "$DEMO_NAME" "$STARTED_AT" "$RUNTIME" "$EXPERIMENT" "${WORKER_COUNT:-unknown}" \
+  "${AIRPLANE_CONTAINER_NAME:-airplane-reservation}" >"$RUN_DIR/summary.txt"
+git -C "$ROOT_DIR" rev-parse HEAD >>"$RUN_DIR/summary.txt" 2>/dev/null || true
 LOCAL_LOG_START=1
 if [ "$RUNTIME" = local ]; then LOCAL_LOG_START=$(( $(wc -c <"$SERVER_LOG") + 1 )); fi
 # Fail early if logging itself is unavailable, before issuing mutations.
@@ -85,13 +85,13 @@ write_report() {
   local reserved_count=0 failed_count=0 cancelled_count=0
 
   if [ "$DEMO_NAME" = demo1 ]; then
-    printf 'Reservation result report\nExperiment: %s\n\n' \
-      "${COMPOSE_EXPERIMENT:-nosync}" >"$report"
+    printf 'Reservation result report\nExperiment: %s\nWorkers: %s\n\n' \
+      "$EXPERIMENT" "${WORKER_COUNT:-unknown}" >"$report"
     printf '%-10s | %-34s | %s\n' 'Client' 'Reservation' 'Cancellation' >>"$report"
     printf '%s\n' '-----------|------------------------------------|-------------' >>"$report"
   else
-    printf 'Concurrent reservation result report\nExperiment: %s\nTarget seat: %s\n\n' \
-      "${COMPOSE_EXPERIMENT:-nosync}" "$SEAT_ID" >"$report"
+    printf 'Concurrent reservation result report\nExperiment: %s\nWorkers: %s\nTarget seat: %s\n\n' \
+      "$EXPERIMENT" "${WORKER_COUNT:-unknown}" "$SEAT_ID" >"$report"
     printf '%-10s | %s\n' 'Client' 'Reservation' >>"$report"
     printf '%s\n' '-----------|----------------------------------------------' >>"$report"
   fi

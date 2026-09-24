@@ -1,3 +1,0 @@
-services:
-  server:
-    command: ["./server", "sync", "3"]

@@ -6,21 +6,21 @@ RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
 source "$ROOT_DIR/scripts/lib/result_paths.sh"
-RUN_DIR="$(create_result_dir tests compose-smoke)"
+RUN_DIR="$(create_result_dir tests container-smoke)"
 exec > >(tee "$RUN_DIR/test-output.log") 2>&1
-PROJECT_SUFFIX="${GITHUB_RUN_ID:-$$}"
-export COMPOSE_PROJECT_NAME="airplane-compose-smoke-$PROJECT_SUFFIX"
-export RUNTIME=compose
+SUFFIX="${GITHUB_RUN_ID:-$$}"
+export AIRPLANE_CONTAINER_NAME="airplane-container-smoke-$SUFFIX"
+export AIRPLANE_IMAGE="airplane-reservation:smoke-$SUFFIX"
+export RUNTIME=container
 PASS_COUNT=0
 
-cleanup() {
-  bash "$ROOT_DIR/scripts/compose.sh" down -v --remove-orphans >/dev/null 2>&1 || true
-}
+container() { bash "$ROOT_DIR/scripts/container.sh" "$@"; }
+cleanup() { container stop >/dev/null 2>&1 || true; }
 trap cleanup EXIT INT TERM
 
 fail() {
   echo "[FAIL] $*" >&2
-  bash "$ROOT_DIR/scripts/compose.sh" logs --tail=80 server >&2 || true
+  container logs --tail=80 >&2 || true
   exit 1
 }
 
@@ -30,25 +30,25 @@ pass() {
 }
 
 start_experiment() {
-  local experiment="$1"
-  export COMPOSE_EXPERIMENT="$experiment"
+  local experiment="$1" workers="${2:-}"
   cleanup
-  bash "$ROOT_DIR/scripts/compose.sh" up -d --build --force-recreate
-
-  for _ in $(seq 1 60); do
-    if bash "$ROOT_DIR/scripts/compose.sh" logs server 2>/dev/null |
-      grep -q "Airplane Reservation Server started"; then
-      return
-    fi
-    sleep 1
-  done
-  fail "$experiment server did not become ready"
+  if [ -n "$workers" ]; then
+    container start "$experiment" "$workers" || fail "$experiment $workers server did not become ready"
+  else
+    container start "$experiment" || fail "$experiment server did not become ready"
+  fi
+  [ "$(container status)" = true ] || fail "$experiment server is not running"
+  [ "$(container mode)" = "$experiment" ] || fail "$experiment label is incorrect"
+  if [ -n "$workers" ]; then
+    [ "$(container workers)" = "$workers" ] || fail "$experiment worker count is incorrect"
+  fi
 }
 
 count_winners() {
   grep -Ec '^\[CLIENT-[0-9]+\] SUCCESS: Seat 10 reserved$' || true
 }
 
+container build
 start_experiment sequential
 output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
 [ "$(printf '%s\n' "$output" | count_winners)" = 1 ] ||
@@ -57,7 +57,7 @@ output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
   fail "concurrent report should identify the single sequential winner"
 [[ "$output" == *"Report saved in:"* ]] ||
   fail "concurrent report path was not printed"
-pass "sequential Compose configuration"
+pass "sequential single-container configuration"
 
 race_observed=false
 for _ in 1 2 3; do
@@ -69,17 +69,28 @@ for _ in 1 2 3; do
   fi
 done
 [ "$race_observed" = true ] || fail "nosync mode did not expose a race after three attempts"
-pass "unsynchronized Compose configuration exposes concurrent winners"
+pass "unsynchronized workers expose concurrent winners"
 
 start_experiment sync
 output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
 [ "$(printf '%s\n' "$output" | count_winners)" = 1 ] ||
   fail "synchronized mode should have exactly one winner"
-pass "synchronized Compose configuration"
+pass "synchronized single-container configuration"
+
+start_experiment sync 5
+output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
+[ "$(printf '%s\n' "$output" | count_winners)" = 1 ] ||
+  fail "custom synchronized worker count should have exactly one winner"
+[[ "$output" == *"Workers: 5"* ]] ||
+  fail "concurrent report should record custom worker count"
+demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
+[[ "$demo_output" == *"Successful cancellations: 5/5"* ]] ||
+  fail "Demo 1 should work with a custom worker count"
+pass "custom worker count works with both demo scripts"
 
 command_output="$(
   printf 'STATUS 1\nRESERVE 1 2\nSTATUS 1\nCANCEL 1 2\nSTATUS 1\nQUIT\n' |
-    bash "$ROOT_DIR/scripts/compose.sh" exec -T client-1 ./client 1
+    container exec -i ./client 1
 )"
 for expected in \
   "Seat 1 is AVAILABLE" \
@@ -89,15 +100,15 @@ for expected in \
   "SUCCESS: Seat 1 cancelled" \
   "SUCCESS: Seat 2 cancelled" \
   "GOODBYE"; do
-  [[ "$command_output" == *"$expected"* ]] || fail "Compose client flow missed: $expected"
+  [[ "$command_output" == *"$expected"* ]] || fail "client flow missed: $expected"
 done
-pass "Compose command lifecycle"
+pass "client command lifecycle"
 
-load_output="$(bash "$ROOT_DIR/scripts/compose.sh" exec -T client-1 ./load_test 1000 20 STATUS)"
+load_output="$(container exec ./load_test 1000 20 STATUS)"
 for expected in "Completed       : 1000" "Transport Fail  : 0" "Throughput"; do
-  [[ "$load_output" == *"$expected"* ]] || fail "Compose load test missed: $expected"
+  [[ "$load_output" == *"$expected"* ]] || fail "load test missed: $expected"
 done
-pass "Compose load test and throughput"
+pass "load test and throughput"
 
 demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
 [[ "$demo_output" == *"all five clients reserved and cancelled"* ]] ||
@@ -106,17 +117,17 @@ demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
   fail "Demo 1 report should show five successful reservations"
 [[ "$demo_output" == *"Successful cancellations: 5/5"* ]] ||
   fail "Demo 1 report should show five successful cancellations"
-pass "Compose Demo 1 mixed commands"
+pass "Demo 1 mixed commands"
 
 export AIRPLANE_LOG_MODE=quiet
 start_experiment sync
-quiet_output="$(bash "$ROOT_DIR/scripts/compose.sh" exec -T client-1 ./load_test 1000 20 STATUS)"
+quiet_output="$(container exec ./load_test 1000 20 STATUS)"
 [[ "$quiet_output" == *"Operation OK    : 1000"* ]] ||
   fail "quiet benchmark mode should still process requests"
-quiet_logs="$(bash "$ROOT_DIR/scripts/compose.sh" logs server)"
+quiet_logs="$(container logs)"
 [[ "$quiet_logs" != *"[SEQ "* ]] ||
   fail "quiet benchmark mode should suppress per-request logs"
 unset AIRPLANE_LOG_MODE
 pass "quiet benchmark mode preserves requests without per-request logs"
 
-echo "Compose smoke tests: $PASS_COUNT passed, 0 failed"
+echo "Container smoke tests: $PASS_COUNT passed, 0 failed"

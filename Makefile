@@ -16,7 +16,7 @@ OBJECTS = $(SOURCES:%.cpp=build/%.o)
 UNIT_TEST_BINARY = tests/bin/unit_tests
 IPC_TEST_BINARY = tests/bin/ipc_tests
 
-.PHONY: all clean test test-unit test-integration test-regression test-compose
+.PHONY: all clean test test-unit test-integration test-regression test-container
 all: server client load_test
 
 server: $(SERVER_SOURCES:%.cpp=build/%.o)
@@ -59,8 +59,8 @@ test-regression: all
 	bash tests/script_tests.sh
 	bash tests/build_tests.sh
 
-test-compose:
-	bash tests/compose_smoke_tests.sh
+test-container:
+	bash tests/container_smoke_tests.sh
 
 clean:
 	rm -f server client load_test $(UNIT_TEST_BINARY) $(IPC_TEST_BINARY)

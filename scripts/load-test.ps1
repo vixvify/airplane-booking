@@ -16,12 +16,19 @@ param(
     [ValidateRange(1, 20)]
     [Nullable[int]]$SeatId,
 
-    [string]$ClientService = "client-1",
+    [string]$ContainerName,
     [string]$ResultsDirectory
 )
 
 $ErrorActionPreference = "Stop"
 $Operation = $Operation.ToUpperInvariant()
+if ([string]::IsNullOrWhiteSpace($ContainerName)) {
+    $ContainerName = if ([string]::IsNullOrWhiteSpace($env:AIRPLANE_CONTAINER_NAME)) {
+        "airplane-reservation"
+    } else {
+        $env:AIRPLANE_CONTAINER_NAME
+    }
+}
 if ([string]::IsNullOrWhiteSpace($ResultsDirectory)) {
     $ResultsDirectory = Join-Path $PSScriptRoot "..\results"
 }
@@ -47,53 +54,41 @@ $loadExitCode = 1
 $serverLogExitCode = 1
 $failure = $null
 $detectedExperiment = "unknown"
+$detectedWorkerCount = "unknown"
 $detectedLogMode = "unknown"
 $docker = $null
-$composeArgs = @()
 
 try {
-    $dockerCommand = Get-Command docker -ErrorAction Stop
+    $dockerExecutable = if ($env:DOCKER) { $env:DOCKER } else { "docker" }
+    $dockerCommand = Get-Command $dockerExecutable -ErrorAction Stop
     $docker = $dockerCommand.Source
-    $projectDirectory = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-    $composeDirectory = Join-Path $projectDirectory "compose"
-    $projectName = if ([string]::IsNullOrWhiteSpace($env:COMPOSE_PROJECT_NAME)) {
-        Split-Path -Leaf $projectDirectory
-    } else {
-        $env:COMPOSE_PROJECT_NAME
-    }
-    $composeArgs = @(
-        "compose", "--project-directory", $composeDirectory,
-        "--project-name", $projectName,
-        "-f", (Join-Path $composeDirectory "compose.yaml")
-    )
-    $services = & $docker @composeArgs ps --status running --services 2>&1
-    if (($LASTEXITCODE -ne 0) -or ($services -notcontains "server")) {
-        $services | Set-Content -Path $resultFile -Encoding UTF8
-        $failure = "Compose server is not running for project '$projectName'. Start the desired experiment first."
+    $running = & $docker inspect --format '{{.State.Running}}' $ContainerName 2>&1
+    if (($LASTEXITCODE -ne 0) -or ($running -ne "true")) {
+        $running | Set-Content -Path $resultFile -Encoding UTF8
+        $failure = "Server container '$ContainerName' is not running. Start the desired experiment first."
     }
     else {
-        $serverContainerId = & $docker @composeArgs ps --quiet server
-        if (($LASTEXITCODE -ne 0) -or [string]::IsNullOrWhiteSpace($serverContainerId)) {
-            throw "Cannot find the running Compose server container."
+        $serverDetails = & $docker inspect $ContainerName | ConvertFrom-Json
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cannot inspect server container '$ContainerName'."
         }
-
-        $serverDetails = & $docker inspect $serverContainerId | ConvertFrom-Json
         $serverCommand = @($serverDetails[0].Config.Cmd)
-        $serverConfiguration = if ($serverCommand.Count -ge 3) {
-            "$($serverCommand[1]) $($serverCommand[2])"
+        $workerCount = 0
+        if ($serverCommand.Count -ne 3 -or
+            $serverCommand[0] -ne "./server" -or
+            $serverCommand[1] -notin @("sync", "nosync") -or
+            -not [int]::TryParse([string]$serverCommand[2], [ref]$workerCount) -or
+            $workerCount -lt 1 -or $workerCount -gt 64) {
+            throw "Cannot detect server configuration from '$($serverCommand -join ' ')'. Expected ./server sync|nosync with 1-64 workers."
+        }
+        $detectedExperiment = if ($serverCommand[1] -eq "sync" -and $workerCount -eq 1) {
+            "sequential"
         } else {
-            ""
+            $serverCommand[1]
         }
-        $experimentByConfiguration = @{
-            "sync 1" = "sequential"
-            "nosync 3" = "nosync"
-            "sync 3" = "sync"
-        }
-        if (-not $experimentByConfiguration.ContainsKey($serverConfiguration)) {
-            throw "Cannot detect experiment from running server command '$($serverCommand -join ' ')'. Expected sync 1, nosync 3, or sync 3."
-        }
-        $detectedExperiment = $experimentByConfiguration[$serverConfiguration]
+        $detectedWorkerCount = $workerCount
         Write-Host "Detected running experiment: $detectedExperiment"
+        Write-Host "Detected worker count: $detectedWorkerCount"
         $logModeEntry = @($serverDetails[0].Config.Env) |
             Where-Object { $_ -like "AIRPLANE_LOG_MODE=*" } |
             Select-Object -Last 1
@@ -105,7 +100,7 @@ try {
         Write-Host "Detected server logging: $detectedLogMode"
 
         $arguments = @(
-            "exec", "-T", $ClientService, "./load_test",
+            "exec", $ContainerName, "./load_test",
             $TotalRequests.ToString(),
             $Concurrency.ToString(),
             $Operation
@@ -116,7 +111,7 @@ try {
         }
 
         Write-Host "Saving load-test evidence to: $runDirectory"
-        & $docker @composeArgs @arguments 2>&1 |
+        & $docker @arguments 2>&1 |
             Tee-Object -FilePath $resultFile
         $loadExitCode = $LASTEXITCODE
 
@@ -132,7 +127,7 @@ catch {
 finally {
     try {
         if ($null -ne $docker) {
-            & $docker @composeArgs logs --since $startedAt --timestamps server 2>&1 |
+            & $docker logs --since $startedAt --timestamps $ContainerName 2>&1 |
                 Set-Content -Path $serverLogFile -Encoding UTF8
             $serverLogExitCode = $LASTEXITCODE
         }
@@ -153,8 +148,9 @@ finally {
         "started_at=$startedAt"
         "finished_at=$((Get-Date).ToUniversalTime().ToString('o'))"
         "experiment=$detectedExperiment"
+        "workers=$detectedWorkerCount"
         "log_mode=$detectedLogMode"
-        "client_service=$ClientService"
+        "container_name=$ContainerName"
         "total_requests=$TotalRequests"
         "concurrency=$Concurrency"
         "operation=$Operation"

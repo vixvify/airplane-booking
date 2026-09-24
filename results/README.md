@@ -14,7 +14,7 @@ results/
 │   ├── regression/<วันเวลา>/
 │   ├── scripts/<วันเวลา>/
 │   ├── build/<วันเวลา>/
-│   └── compose-smoke/<วันเวลา>/
+│   └── container-smoke/<วันเวลา>/
 └── archive/
     └── legacy/                 ผลจากรูปแบบโฟลเดอร์เดิม
 ```
@@ -28,7 +28,7 @@ results/
 - Server log ที่เก็บระหว่างรัน: `demos/<ชนิด demo>/<รอบ>/server-live.log`
 - ผล Load Test และ throughput: `load-tests/<รอบ>/output.log`
 - Server log ของ Load Test: `load-tests/<รอบ>/server.log`
-- โหมดที่ใช้และ exit code: `summary.txt` ในโฟลเดอร์ของรอบนั้น
+- โหมดที่ใช้ จำนวน workers และ exit code: `summary.txt` ในโฟลเดอร์ของรอบนั้น
 - ผล test suite ทั้งหมด: `tests/suite/<รอบ>/test-output.log`
 
 เปิด `summary.txt` ก่อนเพื่อดูว่าใช้โหมดอะไรและสำเร็จหรือไม่ ชื่อโฟลเดอร์เรียงตามเวลาได้ และแต่ละสคริปต์จะแสดง path ของผลรอบนั้นใน terminal
