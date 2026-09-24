@@ -39,6 +39,18 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+  local name="$3"
+
+  if grep -Fq "$unexpected" "$file"; then
+    fail "$name"
+  else
+    pass "$name"
+  fi
+}
+
 assert_count() {
   local file="$1"
   local expected="$2"
@@ -180,6 +192,55 @@ assert_contains "$OUTPUT" '[PASS] Successful reservations: 1/5' 'Result renderer
 assert_contains "$OUTPUT" '[FAIL] Failed reservations: 4/5' 'Result renderer highlights failed totals'
 assert_contains "$OUTPUT" 'client-1   | SUCCESS (Seat 10)' 'Result renderer preserves per-client success details'
 assert_contains "$OUTPUT" 'client-2   | FAILED: already reserved' 'Result renderer preserves per-client failure details'
+
+SEAT_MAP_SAMPLE="$TEST_DIR/seat-map-sample.txt"
+for seat in {1..20}; do
+  if [ "$seat" -eq 2 ]; then
+    printf 'Seat %s : RESERVED by Client-42\n' "$seat"
+  else
+    printf 'Seat %s : AVAILABLE\n' "$seat"
+  fi
+done >"$SEAT_MAP_SAMPLE"
+OUTPUT="$TEST_DIR/seat-map-renderer.raw"
+if FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_seat_map "$1"' _ "$SEAT_MAP_SAMPLE" >"$OUTPUT" 2>&1; then
+  pass 'Seat-map renderer formats all 20 seats'
+else
+  fail 'Seat-map renderer formats all 20 seats'
+fi
+assert_contains "$OUTPUT" 'AIRPLANE SEAT MAP' 'Seat map has a clear title'
+assert_contains "$OUTPUT" '[01]' 'Seat map displays an available seat without extra text'
+assert_contains "$OUTPUT" '[02:C-42]' 'Seat map displays a compact reservation owner'
+assert_not_contains "$OUTPUT" 'FREE' 'Seat map does not repeat FREE in every available seat'
+assert_contains "$OUTPUT" 'Row 01' 'Seat map displays ten numbered rows'
+assert_contains "$OUTPUT" '[01]' 'Seat map places Seat 1 in the left column'
+assert_contains "$OUTPUT" '[11]' 'Seat map places Seat 11 in the right column'
+assert_contains "$OUTPUT" 'Row 10' 'Seat map includes the tenth row'
+assert_contains "$OUTPUT" '[10]' 'Seat map ends the left column at Seat 10'
+assert_contains "$OUTPUT" '[20]' 'Seat map ends the right column at Seat 20'
+assert_contains "$OUTPUT" 'LEFT' 'Seat map labels the left seat column'
+assert_contains "$OUTPUT" 'RIGHT' 'Seat map labels the right seat column'
+assert_contains "$OUTPUT" '┼' 'Seat map displays a single center aisle divider'
+assert_contains "$OUTPUT" '▲ FRONT' 'Seat map marks the front clearly'
+assert_contains "$OUTPUT" '▼ TAIL' 'Seat map marks the tail clearly'
+assert_contains "$OUTPUT" '● 19 available' 'Seat map totals available seats'
+assert_contains "$OUTPUT" '● 1 reserved' 'Seat map totals reserved seats'
+assert_contains "$OUTPUT" '[10:C-1]' 'Seat map legend uses a concrete owner example'
+assert_not_contains "$OUTPUT" 'Client-n' 'Seat map legend does not show a placeholder as data'
+
+CONFLICT_SAMPLE="$TEST_DIR/seat-conflicts-sample.txt"
+printf '2|Client-2, Client-7, Client-9|Client-42\n' >"$CONFLICT_SAMPLE"
+OUTPUT="$TEST_DIR/seat-map-conflict-renderer.raw"
+if FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_seat_map "$1" "$2"' \
+  _ "$SEAT_MAP_SAMPLE" "$CONFLICT_SAMPLE" >"$OUTPUT" 2>&1; then
+  pass 'Seat-map renderer exposes conflicting successes'
+else
+  fail 'Seat-map renderer exposes conflicting successes'
+fi
+assert_contains "$OUTPUT" '[02:RACE]' 'Conflicted seat is marked as RACE instead of one apparent winner'
+assert_contains "$OUTPUT" '⚠ 1 conflict' 'Seat map totals detected conflicts'
+assert_contains "$OUTPUT" '[FAIL] CONSISTENCY CHECK' 'Seat map fails its consistency check'
+assert_contains "$OUTPUT" 'SUCCESS clients: Client-2, Client-7, Client-9' 'Conflict evidence lists every successful client'
+assert_contains "$OUTPUT" 'Final stored owner: Client-42 (last write won)' 'Conflict evidence distinguishes final memory from successful replies'
 
 printf '\nTUI tests: %d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 if [ "$FAIL_COUNT" -ne 0 ]; then

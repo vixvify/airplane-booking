@@ -50,7 +50,11 @@ case "$command" in
         [ "${MOCK_FAIL:-}" != "client-$id" ] || { echo "mock client failure" >&2; exit 44; }
         while read -r operation seat; do
           case "$operation" in
-            LIST) echo "===== Airplane Seat Map =====" ;;
+            LIST)
+              echo "===== Airplane Seat Map ====="
+              for seat_id in {1..20}; do echo "Seat $seat_id : AVAILABLE"; done
+              echo "============================="
+              ;;
             STATUS) echo "Seat $seat is AVAILABLE" ;;
             RESERVE)
               if [ "${MOCK_RESERVE_FAIL_CLIENT:-}" = "client-$id" ]; then

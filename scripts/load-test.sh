@@ -49,12 +49,31 @@ load_status="${PIPESTATUS[0]}"
 set -e
 log_status=0
 container logs --since "$STARTED_AT" --timestamps >"$RUN_DIR/server.log" 2>&1 || log_status=$?
+seat_map_available=true
+if ! printf 'LIST\nQUIT\n' | runtime_client 9999 >"$RUN_DIR/seat-map.txt" 2>&1; then
+  seat_map_available=false
+fi
+if ! grep -q '^Seat 20 : ' "$RUN_DIR/seat-map.txt"; then
+  seat_map_available=false
+fi
 
 extract_metric() {
   local label="$1" value
   value="$(sed -n "s/^${label}[[:space:]]*:[[:space:]]*//p" "$RUN_DIR/output.log" | tail -n 1)"
   printf '%s' "${value:-not available}"
 }
+
+CONFLICT_COUNT=0
+: >"$RUN_DIR/seat-conflicts.txt"
+if [ "$OPERATION" = RESERVE ] && [ -n "$SEAT_ID" ]; then
+  successful_operations="$(extract_metric 'Operation OK')"
+  if [[ "$successful_operations" =~ ^[0-9]+$ ]] && [ "$successful_operations" -gt 1 ]; then
+    final_owner="$(sed -n "s/^Seat $SEAT_ID : RESERVED by //p" "$RUN_DIR/seat-map.txt" | head -n 1)"
+    printf '%s|%s successful logical clients (individual IDs not emitted)|%s\n' \
+      "$SEAT_ID" "$successful_operations" "${final_owner:-unknown}" >"$RUN_DIR/seat-conflicts.txt"
+    CONFLICT_COUNT=1
+  fi
+fi
 
 cat >"$RUN_DIR/report.txt" <<REPORT
 ============================================================================
@@ -81,10 +100,13 @@ Completion rate: $(extract_metric 'Completion Rate')
 Total time: $(extract_metric 'Total Time')
 Throughput: $(extract_metric 'Throughput')
 Average latency: $(extract_metric 'Average Latency')
+Consistency check: $([ "$CONFLICT_COUNT" -gt 0 ] && printf 'FAILED (%s seat conflict detected)' "$CONFLICT_COUNT" || printf 'PASSED')
 
 ARTIFACTS
 ---------
 Raw benchmark output: output.log
+Seat map snapshot: seat-map.txt
+Conflict evidence: seat-conflicts.txt
 Server log: server.log
 Machine-readable summary: summary.txt
 REPORT
@@ -101,6 +123,8 @@ operation=$OPERATION
 seat_id=${SEAT_ID:-round-robin 1-20}
 load_output=output.log
 server_log=server.log
+seat_map=seat-map.txt
+seat_conflicts=seat-conflicts.txt
 report_file=report.txt
 load_exit_code=$load_status
 server_log_exit_code=$log_status
@@ -115,5 +139,10 @@ if [ "$log_status" -ne 0 ]; then
   exit "$log_status"
 fi
 ui_render_report "$RUN_DIR/report.txt"
+if [ "$seat_map_available" = true ]; then
+  ui_render_seat_map "$RUN_DIR/seat-map.txt" "$RUN_DIR/seat-conflicts.txt"
+else
+  ui_note "Seat map is unavailable; inspect $RUN_DIR/seat-map.txt for details."
+fi
 ui_success "Load test finished. Results: $RUN_DIR"
 [ -t 1 ] || echo "Load test finished. Results: $RUN_DIR"

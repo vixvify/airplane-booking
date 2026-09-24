@@ -23,7 +23,7 @@ On Windows, the root README describes running the project in one Docker containe
 
 Additional checks cover all client commands, validation, ownership, multi-seat transactions, the three experiment modes, stable load-test client IDs and seat mappings, IPC timeouts and cleanup, concurrent sessions, and Demo 1.
 
-Script tests also verify that the concurrent experiment accepts a configurable client count and all four commands while Demo 1 remains fixed at five clients. `tui_tests.sh` simulates key presses, checks command selection, menu navigation and editable values, verifies alternate-screen transitions, keeps action logs in the normal scrollback buffer, and prevents regressions that clear or redraw the complete screen after every key press.
+Script tests also verify that the concurrent experiment accepts a configurable client count and all four commands while Demo 1 remains fixed at five clients. They also check that multiple successful reservations for one seat are reported as a consistency failure, with every successful client preserved separately from the final stored owner. `tui_tests.sh` simulates key presses, checks command selection, menu navigation and editable values, verifies alternate-screen transitions, keeps action logs in the normal scrollback buffer, and prevents regressions that clear or redraw the complete screen after every key press.
 
 ## Container smoke suite
 

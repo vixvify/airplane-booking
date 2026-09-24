@@ -57,6 +57,12 @@ output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
   fail "concurrent report should identify the single sequential winner"
 [[ "$output" == *"Report saved in:"* ]] ||
   fail "concurrent report path was not printed"
+[[ "$output" == *"AIRPLANE SEAT MAP"* ]] ||
+  fail "concurrent result should display the final seat map"
+[[ "$output" == *"19 available"* && "$output" == *"1 reserved"* ]] ||
+  fail "sequential seat map should show one reserved and nineteen available seats"
+[[ "$output" == *"Consistency check: PASSED"* ]] ||
+  fail "sequential result should pass its consistency check"
 pass "sequential single-container configuration"
 
 race_observed=false
@@ -69,12 +75,20 @@ for _ in 1 2 3; do
   fi
 done
 [ "$race_observed" = true ] || fail "nosync mode did not expose a race after three attempts"
+[[ "$output" == *"[10:RACE]"* ]] ||
+  fail "nosync result should mark the contested seat as RACE"
+[[ "$output" == *"[FAIL] CONSISTENCY CHECK"* ]] ||
+  fail "nosync result should fail its consistency check"
+[[ "$output" == *"SUCCESS clients:"* && "$output" == *"Final stored owner:"* ]] ||
+  fail "nosync result should explain all successful replies and the final stored owner"
 pass "unsynchronized workers expose concurrent winners"
 
 start_experiment sync
 output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
 [ "$(printf '%s\n' "$output" | count_winners)" = 1 ] ||
   fail "synchronized mode should have exactly one winner"
+[[ "$output" == *"Consistency check: PASSED"* && "$output" != *"RACE"* ]] ||
+  fail "synchronized result should pass without a race marker"
 pass "synchronized single-container configuration"
 
 start_experiment sync

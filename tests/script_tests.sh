@@ -78,6 +78,7 @@ load_output="$(bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS)"
   fail "Bash load-test wrapper did not complete"
 load_summary="$(sed -n 's/^Load test finished. Results: //p' <<<"$load_output" | tail -n 1)/summary.txt"
 load_report="$(dirname "$load_summary")/report.txt"
+load_seat_map="$(dirname "$load_summary")/seat-map.txt"
 grep -q '^total_requests=1000$' "$load_summary" ||
   fail "Bash load-test summary is missing total requests"
 grep -q '^concurrency=20$' "$load_summary" ||
@@ -88,6 +89,8 @@ for section in CONFIGURATION RESULTS ARTIFACTS; do
 done
 grep -q '^Throughput: 12000 req/sec$' "$load_report" ||
   fail "Load-test report is missing the throughput result"
+grep -q '^Seat 20 : AVAILABLE$' "$load_seat_map" ||
+  fail "Load-test result is missing the final seat map"
 echo "[PASS] Bash load-test wrapper saves output and summary"
 
 find "$RESULTS_DIR/demos/concurrent" -name summary.txt -exec grep -H 'exit_code=' {} + >"$TEST_DIR/summaries.log"
@@ -97,6 +100,10 @@ grep -Eq 'exit_code=[1-9]' "$TEST_DIR/summaries.log" ||
 concurrent_output="$(MOCK_RESERVE_FAIL_CLIENT=client-2 bash "$ROOT_DIR/scripts/concurrent-test.sh")"
 concurrent_report="$(sed -n 's/^Report saved in: //p' <<<"$concurrent_output" | tail -n 1)"
 [ -f "$concurrent_report" ] || fail "concurrent reservation report was not saved"
+concurrent_seat_map="$(dirname "$concurrent_report")/seat-map.txt"
+concurrent_conflicts="$(dirname "$concurrent_report")/seat-conflicts.txt"
+grep -q '^Seat 20 : AVAILABLE$' "$concurrent_seat_map" ||
+  fail "concurrent result is missing the final seat map"
 for section in CONFIGURATION 'CLIENT RESULTS' SUMMARY ARTIFACTS; do
   grep -qx "$section" "$concurrent_report" || fail "Concurrent report is missing $section section"
 done
@@ -108,6 +115,12 @@ grep -q 'Successful reservations: 4/5' "$concurrent_report" ||
   fail "concurrent report summary is incorrect for the simulated contention"
 grep -q '^Workers: 5$' "$concurrent_report" ||
   fail "concurrent report did not record the running worker count"
+grep -q '^Consistency check: FAILED (1 seat conflict detected)$' "$concurrent_report" ||
+  fail "concurrent report did not flag multiple successful reservations"
+grep -q '^10|Client-1, Client-3, Client-4, Client-5|unknown$' "$concurrent_conflicts" ||
+  fail "concurrent conflict evidence did not preserve all successful clients"
+[[ "$concurrent_output" == *"[10:RACE]"* && "$concurrent_output" == *"[FAIL] CONSISTENCY CHECK"* ]] ||
+  fail "concurrent console output did not expose the race"
 echo "[PASS] concurrent reservation report is saved with per-client results"
 
 custom_output="$(CLIENT_COUNT=7 MOCK_RESERVE_FAIL_CLIENT=client-2 bash "$ROOT_DIR/scripts/concurrent-test.sh")"

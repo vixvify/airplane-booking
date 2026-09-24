@@ -28,6 +28,8 @@ bash scripts/menu.sh
 
 เมื่อเริ่มรัน test เมนูจะสลับกลับมายังหน้าจอ Terminal ปกติ ล้างข้อความของการรันก่อนหน้า และแสดงเฉพาะ live logs ของรอบใหม่ซึ่งเลื่อนดูย้อนหลังได้ หลังงานจบให้เลื่อนตรวจ logs ก่อน แล้วกด `Enter` เพื่อกลับเข้าเมนู ส่วนผลรอบเก่ายังอยู่ครบใน `results/`
 
+หลังจบ Experiment, Demo หรือ Load Test จะแสดงผังที่นั่ง 20 ที่นั่งเป็น cabin ยาว 10 แถว 2 คอลัมน์พร้อมทางเดินกลาง โดยฝั่งซ้ายเป็น Seat 1–10 และฝั่งขวาเป็น Seat 11–20 ที่นั่งว่างแสดงเป็นสีเขียว เช่น `[01]` และที่นั่งที่จองแล้วแสดงเป็นสีแดง เช่น `[10:C-1]` หมายถึง Seat 10 มี owner สุดท้ายเป็น Client-1 หากหลาย client ได้รับ `SUCCESS` สำหรับที่นั่งเดียวกัน ผังจะแสดง `[10:RACE]`, ให้ consistency check เป็น `FAILED` และแสดงทั้งรายชื่อ client ที่สำเร็จกับ owner สุดท้ายแยกกัน หลักฐานดิบถูกเก็บใน `seat-map.txt` และ `seat-conflicts.txt` ของรอบนั้น
+
 - Experiment 1–3 เลือกคำสั่ง `LIST`, `STATUS`, `RESERVE` หรือ `CANCEL`, จำนวน clients, target seat, workers (ยกเว้น Experiment 1 ที่ต้องเป็น 1 worker), log mode และว่าจะ build image ใหม่หรือไม่ โดย `LIST` ไม่ใช้ target seat
 - Demo 1 เลือก workers และ log mode; จำนวน clients คงที่ 5 เพราะชุดคำสั่งของเดโมกำหนดไว้ตาม requirement
 - Load test เลือก server mode, workers, total requests, concurrency/logical clients, operation, fixed/round-robin seat, log mode และการ build image โดยกด `←`/`→` ที่ total requests จะเปลี่ยนครั้งละ 100,000 หรือกด `Enter` เพื่อกรอกเอง

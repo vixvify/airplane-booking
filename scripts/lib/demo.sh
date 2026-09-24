@@ -12,6 +12,7 @@ STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
 LOG_PID=""
 READER_PID=""
 CLIENT_PIDS=()
+CONFLICT_COUNT=0
 
 stop_logs() {
   if [ -n "$LOG_PID" ]; then
@@ -201,8 +202,14 @@ write_report() {
       "$success_count" "$CLIENT_COUNT" "$failed_count" "$CLIENT_COUNT" >>"$report"
   fi
 
+  if [ "$CONFLICT_COUNT" -gt 0 ]; then
+    printf 'Consistency check: FAILED (%s seat conflict detected)\n' "$CONFLICT_COUNT" >>"$report"
+  else
+    printf 'Consistency check: PASSED\n' >>"$report"
+  fi
+
   printf '\n%s\n%s\n' 'ARTIFACTS' '---------' >>"$report"
-  printf 'Client outputs: clients/\nServer log: server.log\nLive server log: server-live.log\n' >>"$report"
+  printf 'Seat map snapshot: seat-map.txt\nConflict evidence: seat-conflicts.txt\nClient outputs: clients/\nServer log: server.log\nLive server log: server-live.log\n' >>"$report"
 
   ui_render_report "$report"
   ui_success "Report saved in: $report"
@@ -270,7 +277,36 @@ fi
 stop_logs
 # A final bounded snapshot also captures the last lines if the live stream lagged.
 if ! runtime_log_snapshot >"$RUN_DIR/server.log" 2>&1; then failed=1; fi
+seat_map_available=true
+if ! printf 'LIST\nQUIT\n' | runtime_client 9999 >"$RUN_DIR/seat-map.txt" 2>&1; then
+  seat_map_available=false
+fi
+if ! grep -q '^Seat 20 : ' "$RUN_DIR/seat-map.txt"; then
+  seat_map_available=false
+fi
+: >"$RUN_DIR/seat-conflicts.txt"
+if [ "$DEMO_NAME" != demo1 ] && [ "$COMMAND" = RESERVE ]; then
+  successful_clients=""
+  successful_count=0
+  for ((id = 1; id <= CLIENT_COUNT; ++id)); do
+    if grep -Fqx "SUCCESS: Seat $SEAT_ID reserved" "$RUN_DIR/clients/client-$id/output.log"; then
+      successful_clients+="${successful_clients:+, }Client-$id"
+      successful_count=$((successful_count + 1))
+    fi
+  done
+  if [ "$successful_count" -gt 1 ]; then
+    final_owner="$(sed -n "s/^Seat $SEAT_ID : RESERVED by //p" "$RUN_DIR/seat-map.txt" | head -n 1)"
+    printf '%s|%s|%s\n' "$SEAT_ID" "$successful_clients" "${final_owner:-unknown}" \
+      >"$RUN_DIR/seat-conflicts.txt"
+    CONFLICT_COUNT=1
+  fi
+fi
 write_report
+if [ "$seat_map_available" = true ]; then
+  ui_render_seat_map "$RUN_DIR/seat-map.txt" "$RUN_DIR/seat-conflicts.txt"
+else
+  ui_note "Seat map is unavailable; inspect $RUN_DIR/seat-map.txt for details."
+fi
 
 for ((id = 1; id <= CLIENT_COUNT; ++id)); do
   file="$RUN_DIR/clients/client-$id/output.log"
