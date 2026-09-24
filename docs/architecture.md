@@ -1,96 +1,93 @@
 # System Architecture
 
-เอกสารนี้อธิบายระบบจองที่นั่งตาม implementation ปัจจุบัน รวมการสื่อสารผ่าน System V message queues, การจัดการ transaction, worker synchronization และการรัน services ด้วย Docker Compose
+ระบบจองที่นั่งนี้รันบน Linux ภายใน Docker Compose โดยมี client containers 5 ตัวและ server container 1 ตัว Client กับ server คุยกันผ่าน **System V message queues สองชุด** ส่วน worker threads และสถานะที่นั่งอยู่ภายใน server process เดียวกัน
 
 ## ภาพรวม
 
-[![System architecture: five clients, separate request and response queues, a server process, and three workers](architecture.svg)](architecture.svg)
+[![แผนภาพระบบ: client 1–5, request/response queues, server และ worker 1–3 พร้อมรายละเอียดภายใน](architecture.svg)](architecture.svg)
 
-ภาพนี้แยก client 1–5, request queue, response queue, server process และ worker 1–3 ให้เห็นชัด: workers รับงานจาก request queue ร่วมกัน และส่งคำตอบเข้า response queue เพื่อให้ client รับคำตอบที่ตรงกับ `requestId`
+อ่านภาพจากซ้ายไปขวา: client ส่งคำสั่งเข้า **request queue** → worker ตัวหนึ่งรับไปทำงานกับสถานะที่นั่ง → ส่งผลเข้า **response queue** → client รับเฉพาะคำตอบที่ตรงกับ `requestId` ของตัวเอง เส้นสีน้ำเงินคือ request, สีเขียวคือ response, สีเทาคือการเริ่ม service หรือการเข้าถึง state ภายใน server
 
-Experiment 1 ใช้ worker 1 ตัว; Experiment 2 และ 3 ใช้ worker 3 ตัว สถานะที่นั่ง 20 ที่อยู่ใน memory ของ server process และมี per-seat mutex เฉพาะโหมด sync
+### แต่ละส่วนทำอะไร
 
-Client containers และ server ใช้ IPC namespace ร่วมกัน ส่วน named volume ที่ `/ipc` มีไว้ให้ `ftok` สร้าง queue keys เท่านั้น ไม่ได้เก็บ queue หรือสถานะการจอง
-
-## Compose topology
-
-ไฟล์ `compose/compose.yaml` กำหนด service `server` และ client services 5 ตัว แต่ละ client รอคำสั่งจาก `docker compose exec`:
-
-| Compose service | Process |
-| --- | --- |
-| `server` | `./server nosync 3` ตามค่าเริ่มต้น |
-| `client-1` ถึง `client-5` | `sleep infinity` เพื่อรอรับ client/load-test process |
-
-Server ใช้ IPC namespace แบบ `shareable`; clients ใช้ namespace เดียวกับ server ผ่าน `ipc: service:server`. ทุก service mount named volume เดียวกันที่ `/ipc`, ซึ่งเป็น path ที่ `ftok` ใช้สร้าง key ของ queues และ semaphore
-
-การแบ่ง IPC namespace ของ Compose project ทำให้ System V queues ไม่ปะปนกับ host หรือ Compose project อื่น
-
-### Experiment configurations
-
-Compose overlays เปลี่ยนเฉพาะ server command:
-
-| Experiment | Configuration | Server command |
+| ส่วนในภาพ | สิ่งที่ใช้จริง | หน้าที่ |
 | --- | --- | --- |
-| Sequential baseline | `compose/compose.sequential.yaml` | `./server sync 1` |
-| Concurrent without synchronization | `compose/compose.yaml` | `./server nosync 3` |
-| Concurrent with synchronization | `compose/compose.sync.yaml` | `./server sync 3` |
+| Host scripts | `scripts/`, `tests/` และ Docker Compose | เริ่ม/หยุด services, เปิด client, รัน demo/load test และเก็บผลลง `results/` บน host |
+| Client 1–5 | Compose services `client-1` ถึง `client-5` | แต่ละ container รอด้วย `sleep infinity`; เมื่อสั่ง `docker compose exec` จึงเริ่ม `./client <client_id>` หรือ `./load_test` ภายใน container |
+| Request queue | System V `msgget`/`msgsnd`/`msgrcv` | รับคำสั่งจากทุก client ร่วมกัน; request ทุกอันใช้ `mtype = 1` |
+| Response queue | System V message queue อีกชุด | รับคำตอบจาก workers; `mtype = requestId` เพื่อให้แต่ละคำขออ่านผลของตนเองได้ ไม่ต้องมี private queue |
+| Server process | `./server <sync|nosync> <worker_count>` | กัน server ซ้ำด้วย `flock`, สร้าง queues, เปิด worker threads, ถือ seat state และลบ queues เมื่อปิดตามปกติ |
+| Worker 1–3 | C++ `std::thread` ภายใน server process | แย่งกันรับ request จากคิวเดียว, parse/validate คำสั่ง, เรียก reservation logic และส่ง response |
+| Seat state | `int seats[20]` ใน memory ของ server | `0` หมายถึงว่าง; ค่า `clientId` ที่เป็นบวกหมายถึง client นั้นจองไว้; รีเซ็ตเมื่อเริ่ม server ใหม่ |
+| Seat locks | `std::mutex seatMutexes[20]` | ล็อกแยกตามที่นั่งในโหมด `sync`; โหมด `nosync` ตั้งใจไม่ใช้เพื่อสาธิต race condition |
 
-`scripts/compose.sh` เลือก overlay จาก `COMPOSE_EXPERIMENT`. เมื่อต้องการเปลี่ยนรูปแบบ ให้หยุด services แล้วเริ่มใหม่เพื่อให้ได้ server และ IPC state ชุดใหม่
+## Container และ IPC ใช้ร่วมกันอย่างไร
 
-## Message flow
+`compose/compose.yaml` ให้ server ใช้ `ipc: shareable` และ clients ใช้ `ipc: service:server` จึงมองเห็น System V queues ชุดเดียวกัน ทุก container ยัง mount named volume เดียวกันที่ `/ipc` เพื่อให้ `ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` ได้ key สำหรับ request/response queue ตามลำดับ
 
-1. Client สร้าง `requestId` และส่ง message ไปยัง shared request queue
-2. Worker ตัวใดตัวหนึ่งรับ request แล้วประมวลผล operation
-3. Server ส่ง response เข้า shared response queue โดยใช้ `requestId` เป็น message type สำหรับ routing
-4. Client อ่าน response ที่ตรงกับ request ของตัวเอง
+**Queue messages ไม่ได้ถูกเก็บใน volume**: ตัว queue อยู่ใน kernel ของ IPC namespace ส่วน `/ipc` เป็นเพียง path อ้างอิงเพื่อสร้าง key และมีไฟล์ `/ipc/server.lock` สำหรับ `flock` ป้องกันการเปิด server ซ้ำ ระบบนี้ไม่ได้ใช้ System V semaphore; ตัวป้องกัน race ของที่นั่งคือ C++ `std::mutex` ใน server process
 
-Request และ response แยกคนละ queue; response ไม่ย้อนกลับเข้า request queue และไม่ต้องมี private queue ต่อ client
+## เส้นทางของหนึ่งคำสั่ง
 
-## Message data
+ตัวอย่าง client ส่ง `RESERVE 10`:
 
-Message มีข้อมูลสำหรับแยกชนิดกับ route งาน:
+1. `./client` สร้าง `RequestMessage` ที่มี `clientId`, `requestId`, `command` แล้วส่งเข้า request queue โดยกำหนด `mtype = 1`.
+2. Worker ตัวใดตัวหนึ่งรับ message จากคิว ตรวจรูปแบบ message แล้ว parse คำสั่งเป็น operation กับ seat ID.
+3. Reservation logic ตรวจช่วงที่นั่ง 1–20 และสถานะการจอง หากเป็นโหมด `sync` จะใช้ mutex ของที่นั่งก่อนตรวจและแก้ค่า; หากเป็น `nosync` จะข้าม lock เพื่อให้เห็น race.
+4. Worker ส่ง `ResponseMessage` เข้า response queue โดยกำหนด `mtype` เป็น `requestId` ของคำขอ และส่งเฉพาะจำนวน bytes ที่มีข้อความตอบกลับจริง.
+5. Client อ่านด้วย `msgrcv(..., requestId, ...)` แล้วตรวจ `clientId` และ `requestId` ใน payload อีกครั้งก่อนแสดงผล.
 
-| Field | Purpose |
-| --- | --- |
-| `mtype` | System V queue message type; response ใช้ request ID เพื่อให้ client รับ response ของตน |
-| `clientId` | ระบุ client และใช้ตรวจ ownership ของ reservation |
-| `requestId` | ระบุ request ที่ไม่ซ้ำกันและจับคู่ response |
-| `command` | ข้อความคำสั่ง เช่น `RESERVE 3 4` หรือ `STATUS 3` |
-| `response` | ข้อความผลการทำงานที่ส่งกลับ client |
+คำสั่งที่ worker รองรับคือ `LIST` (ทุกที่นั่ง), `STATUS <seat_id>`, `RESERVE <seat_id> [seat_id...]`, `CANCEL <seat_id> [seat_id...]` และ `QUIT`. `QUIT` ส่ง `GOODBYE` กลับและจบ client นั้น ไม่ได้ปิด server
 
-รายละเอียดโครงสร้างจริงอยู่ใน `src/models/message.h`; การ parse คำสั่งเป็น operation และ seat IDs เกิดหลังจาก worker รับ request
+### Message ที่วิ่งในคิว
 
-## Reservation transaction
+โครงสร้างจริงอยู่ใน [`src/models/message.h`](../src/models/message.h); ค่าคงที่อยู่ใน [`src/constants/constants.h`](../src/constants/constants.h)
 
-การจองหรือยกเลิกหลายที่นั่งทำงานแบบ all-or-nothing:
+| Field | Request | Response |
+| --- | --- | --- |
+| `mtype` | `1` สำหรับทุก request | `requestId` ของ request ต้นทาง |
+| `clientId` | เจ้าของคำสั่ง/ใช้ตรวจสิทธิ์ยกเลิก | ส่งกลับเพื่อยืนยันว่าตอบถูก client |
+| `requestId` | เลขระบุคำขอแต่ละครั้ง | ส่งกลับเพื่อยืนยันการจับคู่ |
+| `command[128]` | ข้อความคำสั่งไม่เกิน 127 bytes + NUL | — |
+| `response[2048]` | — | ข้อความผลลัพธ์ + NUL; ส่งเฉพาะความยาวที่ใช้จริง |
 
-1. ตรวจ syntax และ validate ที่นั่งทั้งหมดก่อนเปลี่ยน state
-2. ในโหมด sync ล็อกที่นั่งตามลำดับที่แน่นอนเพื่อลด deadlock
-3. ตรวจ availability หรือ ownership ของทุกที่นั่ง
-4. หากมีรายการใดไม่ผ่าน ให้ยกเลิก transaction และไม่เปลี่ยนรายการใด
-5. หากผ่านทั้งหมด จึง commit state ของทุกที่นั่ง
-6. ปลด locks และส่งผลกลับ client
+ระบบมี **สอง shared queues** ไม่ใช่หนึ่งคิวต่อ client หรือหนึ่งคิวต่อ worker. Client มี deadline 10 วินาทีในการส่ง request/รอ response; หากรอ response จน timeout ผลของ operation อาจยังไม่แน่นอน จึงควรตรวจ `STATUS` ก่อนส่งคำสั่งซ้ำ
 
-โหมด nosync ตั้งใจข้าม mutex เพื่อให้เห็น race condition ในการทดลอง
+## ที่นั่ง, transaction และการล็อก
 
-## Load test และหลักฐาน
+ทุก worker เรียก reservation logic ใน server process เดียวกัน จึงเห็น `seats[20]` ชุดเดียวกัน การจอง/ยกเลิกหลายที่นั่งจะ sort และตัด seat ID ซ้ำ ตรวจข้อมูลและสถานะของทุกที่ก่อนอัปเดต; ถ้าตรวจไม่ผ่านจะไม่เปลี่ยนที่นั่งใดของคำขอนั้น
 
-`load_test` ใช้ thread pool ตาม concurrency ที่กำหนด ส่ง `STATUS`, `RESERVE` หรือ `CANCEL` และรายงาน completed requests, transport failures, operation outcomes, throughput และ average latency
+ในโหมด `sync` worker ล็อก mutex ของที่นั่งเป้าหมายตามลำดับ seat ID และถือไว้ตลอดช่วงตรวจจนถึงอัปเดต จึงทำ `RESERVE`/`CANCEL` หลายที่นั่งแบบ all-or-nothing เมื่อมีหลาย worker แข่งกันได้; การล็อกเรียงลำดับช่วยเลี่ยง deadlock. `STATUS` ล็อกที่นั่งเดียว และ `LIST` ล็อกครบทั้ง 20 ที่นั่งเพื่ออ่าน snapshot ที่สอดคล้องกัน
 
-PowerShell wrapper `scripts/load-test.ps1` เรียก Compose client service และบันทึก output, server logs และ parameters/exit codes เป็นไฟล์ TXT ใน directory แยกต่อรอบ
+ในโหมด `nosync` worker ตรวจทุกที่นั่งก่อนอัปเดต แต่ **ไม่มี mutex รับประกันผลเมื่อหลาย worker ทำพร้อมกัน**: worker อื่นอาจเห็นที่นั่งว่างพร้อมกันและจองทับกันได้ มีการหน่วงสุ่ม 50–500 ms ระหว่างตรวจและอัปเดตเพื่อทำให้ race สังเกตได้ง่ายขึ้น โหมดนี้มีไว้สำหรับการทดลอง ไม่ควรใช้ยืนยันความถูกต้องของการจองจริง
 
-Demo scripts เก็บ commands และ output แยกตาม client พร้อม live/final server logs ใน `results/demos/<demo>/<UTC timestamp>/`. Load-test และ test suites ก็แยก directory ตามประเภท ดูรายการไฟล์ทั้งหมดได้ที่ `results/README.md`; CI อัปโหลดผลเหล่านี้เป็น artifact
+## โหมดทดลอง
 
-## Repository map
+Compose overlay เปลี่ยนคำสั่งเริ่ม server โดยไม่เปลี่ยน topology ของ client และ queues:
+
+| Experiment | Compose configuration | Server command | จุดที่สังเกต |
+| --- | --- | --- | --- |
+| 1: Sequential baseline | `compose/compose.sequential.yaml` | `./server sync 1` | มี worker เดียว จึงประมวลผลทีละ request |
+| 2: Concurrent nosync | `compose/compose.yaml` | `./server nosync 3` | มีสาม worker และตั้งใจไม่ล็อกเพื่อแสดง race |
+| 3: Concurrent sync | `compose/compose.sync.yaml` | `./server sync 3` | มีสาม worker พร้อม per-seat mutex |
+
+`scripts/compose.sh` เลือก overlay จาก `COMPOSE_EXPERIMENT` (ค่าเริ่มต้น `nosync`). เมื่อต้องการเปลี่ยน experiment ให้หยุดแล้วเริ่ม Compose ใหม่ เพื่อให้ server และสถานะใน memory เป็นชุดใหม่ ดูคำสั่งรันจริงใน [README](../README.md)
+
+## Logs, load test และหลักฐาน
+
+Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` จึงตามลำดับการรับคำสั่ง, การรอ/ได้ lock และการเข้า/ออก critical section ได้ `AIRPLANE_LOG_MODE=quiet` ลด log ระดับ worker สำหรับ benchmark แต่ไม่เปลี่ยน message flow หรือ reservation logic
+
+`./load_test` เรียก exchange เดียวกับ client แต่สร้างหลาย threads ตามค่า concurrency และสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
+
+## แผนที่โค้ด
 
 | Path | Responsibility |
 | --- | --- |
-| `src/client/` | รับคำสั่งผู้ใช้ ส่ง request และรับ response |
-| `src/server/` | สร้าง queues, worker threads และประมวลผล requests |
-| `src/ipc/` | System V queue wrappers และป้องกัน server ซ้ำ |
-| `src/reservation/` | seat state, validation, transaction และ synchronization |
-| `src/load_test/` | concurrent load generator และ throughput/latency summary |
-| `src/utils/` | CLI parser, logger และ delay utilities |
-| `compose/` | runtime topology และ experiment configurations |
-| `scripts/` | Compose wrapper, demos, concurrent test และ result collection |
-| `tests/` | unit, IPC, integration, regression, script และ Compose smoke tests |
+| `src/client/` | อ่านคำสั่งจากผู้ใช้และแสดง response |
+| `src/ipc/` | สร้าง/เปิด message queues, ส่งและจับคู่ message, กัน server ซ้ำ |
+| `src/server/` | lifecycle ของ server, worker threads และ dispatch คำสั่ง |
+| `src/reservation/` | seat state, validation, reserve/cancel และ mutex |
+| `src/load_test/` | concurrent load generator และตัวเลขผลการทดสอบ |
+| `src/utils/` | parser, logger และ random delay |
+| `compose/` | services และ overlays ของสาม experiment |
+| `scripts/`, `tests/` | คำสั่ง demo/เก็บผล และชุดทดสอบ |
