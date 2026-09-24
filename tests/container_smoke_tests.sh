@@ -77,6 +77,21 @@ output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
   fail "synchronized mode should have exactly one winner"
 pass "synchronized single-container configuration"
 
+start_experiment sync
+for command in STATUS LIST; do
+  output="$(COMMAND="$command" bash "$ROOT_DIR/scripts/concurrent-test.sh")"
+  [[ "$output" == *"Command: $command"* ]] ||
+    fail "$command report should record the selected command"
+  [[ "$output" == *"Successful commands: 5/5"* ]] ||
+    fail "$command should succeed for all five clients"
+done
+output="$(COMMAND=CANCEL bash "$ROOT_DIR/scripts/concurrent-test.sh")"
+[[ "$output" == *"Command: CANCEL"* ]] ||
+  fail "CANCEL report should record the selected command"
+[[ "$output" == *"Successful cancellations: 1/5"* ]] ||
+  fail "only Client-1 should cancel the preflight reservation it owns"
+pass "concurrent script supports LIST, STATUS, RESERVE, and CANCEL"
+
 start_experiment sync 5
 output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
 [ "$(printf '%s\n' "$output" | count_winners)" = 1 ] ||

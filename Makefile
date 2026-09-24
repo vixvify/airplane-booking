@@ -57,6 +57,7 @@ test: test-unit
 test-regression: all
 	bash tests/regression_tests.sh
 	bash tests/script_tests.sh
+	bash tests/tui_tests.sh
 	bash tests/build_tests.sh
 
 test-container:

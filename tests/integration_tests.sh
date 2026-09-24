@@ -137,6 +137,18 @@ round_robin_cancel="$(run_load_test "round-robin CANCEL load test" 20 20 CANCEL)
 assert_contains "$round_robin_cancel" "Operation OK    : 20" "round-robin CANCEL should release all seats"
 pass "round-robin RESERVE and CANCEL load lifecycle"
 
+start_server sync 3
+logical_reserve="$(run_load_test "stable logical client ownership" 10 5 RESERVE)"
+assert_contains "$logical_reserve" "Operation OK    : 10" "logical clients should reserve their assigned seats"
+owner_status="$(run_client 1 $'STATUS 1\nSTATUS 6\nSTATUS 2\nSTATUS 7\nQUIT\n')"
+assert_contains "$owner_status" "Seat 1 is RESERVED by Client-10000" "logical client 1 should own Seat 1"
+assert_contains "$owner_status" "Seat 6 is RESERVED by Client-10000" "logical client 1 should keep its ID for Seat 6"
+assert_contains "$owner_status" "Seat 2 is RESERVED by Client-10001" "logical client 2 should own Seat 2"
+assert_contains "$owner_status" "Seat 7 is RESERVED by Client-10001" "logical client 2 should keep its ID for Seat 7"
+logical_cancel="$(run_load_test "stable logical client cancellation" 10 5 CANCEL)"
+assert_contains "$logical_cancel" "Operation OK    : 10" "the same logical clients should cancel their own seats"
+pass "each load-test thread keeps its client ID across requests and runs"
+
 stop_server
 expect_failure "client fails cleanly when the server queue is absent" "$ROOT_DIR/client" 1
 

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+PASS_COUNT=0
+FAIL_COUNT=0
+TEST_DIR="${TMPDIR:-/tmp}/airplane-reservation-tui-tests-$$"
+mkdir -p "$TEST_DIR"
+trap 'rm -rf "$TEST_DIR"' EXIT
+
+ALT_ENTER=$'\033[?1049h'
+ALT_LEAVE=$'\033[?1049l'
+CLEAR_FRAME=$'\033[H\033[2J'
+CLEAR_SCROLLBACK=$'\033[3J\033[H\033[2J'
+DOWN=$'\033[B'
+RIGHT=$'\033[C'
+
+pass() {
+  PASS_COUNT=$((PASS_COUNT + 1))
+  printf 'PASS: %s\n' "$1"
+}
+
+fail() {
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+  printf 'FAIL: %s\n' "$1"
+}
+
+assert_contains() {
+  local file="$1"
+  local expected="$2"
+  local name="$3"
+
+  if grep -Fq "$expected" "$file"; then
+    pass "$name"
+  else
+    fail "$name"
+  fi
+}
+
+assert_count() {
+  local file="$1"
+  local expected="$2"
+  local value="$3"
+  local name="$4"
+  local actual
+
+  actual="$(grep -Fao "$value" "$file" | wc -l | tr -d '[:space:]')"
+  if [ "$actual" = "$expected" ]; then
+    pass "$name"
+  else
+    fail "$name (expected $expected, got $actual)"
+  fi
+}
+
+run_menu() {
+  local keys="$1"
+  local output="$2"
+  printf '%b' "$keys" | timeout 5s bash scripts/menu.sh >"$output" 2>&1
+}
+
+run_menu_with_mock_docker() {
+  local keys="$1"
+  local output="$2"
+  printf '%b' "$keys" | \
+    MOCK_TRACE="$TEST_DIR/docker-calls.log" \
+    DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+    RUNTIME=container \
+    timeout 5s bash scripts/menu.sh >"$output" 2>&1
+}
+
+printf 'Running terminal UI tests...\n\n'
+
+OUTPUT="$TEST_DIR/quit.raw"
+if run_menu 'q' "$OUTPUT"; then
+  pass 'TUI exits with Q'
+else
+  fail 'TUI exits with Q'
+fi
+assert_count "$OUTPUT" 1 "$ALT_ENTER" 'TUI enters alternate screen once'
+assert_count "$OUTPUT" 1 "$ALT_LEAVE" 'TUI restores normal screen once'
+assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'TUI clears the screen only at startup'
+
+OUTPUT="$TEST_DIR/load-navigation.raw"
+if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\nq" "$OUTPUT"; then
+  pass 'Arrow keys and Enter open Load Test form'
+else
+  fail 'Arrow keys and Enter open Load Test form'
+fi
+assert_contains "$OUTPUT" 'Load Test - Logical clients and performance metrics' 'Load Test form is rendered'
+assert_contains "$OUTPUT" 'Total requests: 50000' 'Load Test defaults are rendered'
+assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'Navigation does not clear the full screen'
+assert_count "$OUTPUT" 1 'AIRPLANE RESERVATION - TERMINAL CONTROL PANEL' 'Navigation does not redraw the unchanged header'
+
+OUTPUT="$TEST_DIR/exp2-settings.raw"
+if run_menu "${DOWN}\n${RIGHT}${DOWN}${RIGHT}q" "$OUTPUT"; then
+  pass 'Exp2 settings accept navigation input'
+else
+  fail 'Exp2 settings accept navigation input'
+fi
+assert_contains "$OUTPUT" 'Workers: 4' 'Exp2 worker count can be changed'
+assert_contains "$OUTPUT" 'Clients: 6' 'Exp2 client count can be changed'
+assert_count "$OUTPUT" 1 'AIRPLANE RESERVATION - TERMINAL CONTROL PANEL' 'Editing values does not redraw the unchanged header'
+
+OUTPUT="$TEST_DIR/command-selection.raw"
+if run_menu "${DOWN}\n${DOWN}${DOWN}${RIGHT}${RIGHT}${RIGHT}${DOWN}q" "$OUTPUT"; then
+  pass 'Experiment command selector accepts navigation input'
+else
+  fail 'Experiment command selector accepts navigation input'
+fi
+assert_contains "$OUTPUT" 'Command: RESERVE' 'Experiment command defaults to RESERVE'
+assert_contains "$OUTPUT" 'Command: CANCEL' 'Experiment command can select CANCEL'
+assert_contains "$OUTPUT" 'Command: STATUS' 'Experiment command can select STATUS'
+assert_contains "$OUTPUT" 'Command: LIST' 'Experiment command can select LIST'
+assert_contains "$OUTPUT" 'Target seat: disabled' 'LIST disables the unused target seat'
+assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'Command selection uses incremental rendering'
+
+OUTPUT="$TEST_DIR/load-request-step.raw"
+if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}${RIGHT}q" "$OUTPUT"; then
+  pass 'Load Test total requests accepts arrow input'
+else
+  fail 'Load Test total requests accepts arrow input'
+fi
+assert_contains "$OUTPUT" 'Total requests: 150000' 'Load Test total requests increases by 100,000'
+
+OUTPUT="$TEST_DIR/output-screen.raw"
+if run_menu_with_mock_docker "${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}\n\nq" "$OUTPUT"; then
+  pass 'Output screen returns to the menu after Enter'
+else
+  fail 'Output screen returns to the menu after Enter'
+fi
+assert_contains "$OUTPUT" 'AIRPLANE RESERVATION - STOP SERVER' 'Action output is rendered outside the menu screen'
+assert_count "$OUTPUT" 2 "$ALT_LEAVE" 'Action output uses the normal scrollback screen'
+assert_count "$OUTPUT" 2 "$ALT_ENTER" 'Menu resumes in the alternate screen after Enter'
+
+OUTPUT="$TEST_DIR/server-status.raw"
+if run_menu_with_mock_docker "${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}\n\nq" "$OUTPUT"; then
+  pass 'Server Status returns to the menu after Enter'
+else
+  fail 'Server Status returns to the menu after Enter'
+fi
+assert_contains "$OUTPUT" 'AIRPLANE RESERVATION - SERVER STATUS' 'Server Status has a clear title'
+assert_contains "$OUTPUT" 'Server is running and ready.' 'Server Status highlights the running state'
+assert_contains "$OUTPUT" 'Experiment 3 - Concurrent with synchronization' 'Server Status explains the experiment'
+assert_contains "$OUTPUT" 'Enabled (per-seat mutex)' 'Server Status explains synchronization'
+assert_contains "$OUTPUT" 'Workers            : 3' 'Server Status displays the worker count'
+assert_contains "$OUTPUT" 'Container          : airplane-reservation' 'Server Status displays the container name'
+assert_contains "$OUTPUT" 'Image              : airplane-reservation:latest' 'Server Status displays the image name'
+assert_count "$OUTPUT" 1 "$CLEAR_SCROLLBACK" 'Server Status clears logs from the previous command'
+
+OUTPUT="$TEST_DIR/output-reset.raw"
+if MENU_LIBRARY_ONLY=yes bash -c 'source scripts/menu.sh; begin_output_screen' >"$OUTPUT" 2>&1; then
+  pass 'A new run initializes a clean output screen'
+else
+  fail 'A new run initializes a clean output screen'
+fi
+assert_count "$OUTPUT" 1 "$CLEAR_SCROLLBACK" 'A new run clears previous terminal logs once'
+
+REPORT_SAMPLE="$TEST_DIR/report-sample.txt"
+printf '%s\n' \
+  'AIRPLANE RESERVATION - CONCURRENT COMMAND RESULT' \
+  'CONFIGURATION' \
+  'Experiment: sync' \
+  'CLIENT RESULTS' \
+  'Client     | Result' \
+  'client-1   | SUCCESS (Seat 10)' \
+  'client-2   | FAILED: already reserved' \
+  'SUMMARY' \
+  'Successful reservations: 1/5' \
+  'Failed reservations: 4/5' >"$REPORT_SAMPLE"
+OUTPUT="$TEST_DIR/report-renderer.raw"
+if FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_report "$1"' _ "$REPORT_SAMPLE" >"$OUTPUT" 2>&1; then
+  pass 'Interactive result renderer formats a report'
+else
+  fail 'Interactive result renderer formats a report'
+fi
+assert_contains "$OUTPUT" '[ CONFIGURATION ]' 'Result renderer emphasizes sections'
+assert_contains "$OUTPUT" '[PASS] Successful reservations: 1/5' 'Result renderer highlights successful totals'
+assert_contains "$OUTPUT" '[FAIL] Failed reservations: 4/5' 'Result renderer highlights failed totals'
+assert_contains "$OUTPUT" 'client-1   | SUCCESS (Seat 10)' 'Result renderer preserves per-client success details'
+assert_contains "$OUTPUT" 'client-2   | FAILED: already reserved' 'Result renderer preserves per-client failure details'
+
+printf '\nTUI tests: %d passed, %d failed\n' "$PASS_COUNT" "$FAIL_COUNT"
+if [ "$FAIL_COUNT" -ne 0 ]; then
+  exit 1
+fi

@@ -77,7 +77,7 @@
 
 Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` จึงตามลำดับการรับคำสั่ง, การรอ/ได้ lock และการเข้า/ออก critical section ได้ `AIRPLANE_LOG_MODE=quiet` ลด log ระดับ worker สำหรับ benchmark แต่ไม่เปลี่ยน message flow หรือ reservation logic
 
-`./load_test` เรียก exchange เดียวกับ client แต่สร้างหลาย threads ตามค่า concurrency และสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เรียก `docker exec` และเก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
+`./load_test` เรียก exchange เดียวกับ client และสร้างหนึ่ง thread ต่อหนึ่ง logical client ตามค่า concurrency แต่ละ thread ใช้ client ID เดิมตลอดรอบและส่งคำขอทีละรายการ โดยแบ่ง request numbers ให้แต่ละ thread อย่างแน่นอนเพื่อให้จองและยกเลิกด้วย owner เดิมได้ โปรแกรมสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เรียก `docker exec` และเก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
 
 ## แผนที่โค้ด
 

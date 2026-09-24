@@ -10,6 +10,30 @@
 
 Dockerfile build `server`, `client` และ `load_test` ภายใน Linux image ให้แล้ว ไม่จำเป็นต้องติดตั้ง compiler บน Windows
 
+## เมนูสำหรับรันโปรเจกต์ (แนะนำ)
+
+บน Windows ให้ดับเบิลคลิก `run.cmd` ที่โฟลเดอร์โปรเจกต์ หรือเปิด PowerShell แล้วรันเพียงครั้งเดียว:
+
+```powershell
+.\run.cmd
+```
+
+บน Linux หรือ Git Bash:
+
+```bash
+bash scripts/menu.sh
+```
+
+เมนูทำงานเต็มหน้าจอใน Terminal ใช้ปุ่ม `↑`/`↓` เลือกรายการ, `←`/`→` เปลี่ยนค่า, `Enter` แก้ตัวเลขหรือเริ่มรัน, `Esc` ย้อนกลับ และ `Q` ออก เมนูมี Experiment 1–3, Demo 1, Load test, สถานะ server และหยุด server โดยจัดการ build, restart และรีเซ็ตสถานะที่นั่งให้อัตโนมัติ
+
+เมื่อเริ่มรัน test เมนูจะสลับกลับมายังหน้าจอ Terminal ปกติ ล้างข้อความของการรันก่อนหน้า และแสดงเฉพาะ live logs ของรอบใหม่ซึ่งเลื่อนดูย้อนหลังได้ หลังงานจบให้เลื่อนตรวจ logs ก่อน แล้วกด `Enter` เพื่อกลับเข้าเมนู ส่วนผลรอบเก่ายังอยู่ครบใน `results/`
+
+- Experiment 1–3 เลือกคำสั่ง `LIST`, `STATUS`, `RESERVE` หรือ `CANCEL`, จำนวน clients, target seat, workers (ยกเว้น Experiment 1 ที่ต้องเป็น 1 worker), log mode และว่าจะ build image ใหม่หรือไม่ โดย `LIST` ไม่ใช้ target seat
+- Demo 1 เลือก workers และ log mode; จำนวน clients คงที่ 5 เพราะชุดคำสั่งของเดโมกำหนดไว้ตาม requirement
+- Load test เลือก server mode, workers, total requests, concurrency/logical clients, operation, fixed/round-robin seat, log mode และการ build image โดยกด `←`/`→` ที่ total requests จะเปลี่ยนครั้งละ 100,000 หรือกด `Enter` เพื่อกรอกเอง
+
+หัวข้อคำสั่งด้านล่างเก็บไว้เป็นทางเลือกสำหรับ CI, การ debug หรือเครื่องที่ไม่ต้องการใช้เมนู
+
 ## เตรียมก่อนทดลอง
 
 Build image ครั้งเดียวจากโฟลเดอร์โปรเจกต์ แล้วเลือกหัวข้อที่จะรันด้านล่าง ไม่ต้องเปิด server แยกก่อน:
@@ -88,7 +112,7 @@ PowerShell:
 & "$env:ProgramFiles\Git\bin\bash.exe" -lc "bash scripts/concurrent-test.sh"
 ```
 
-ผลที่ควรเห็น: server ประมวลผลทีละ request เพราะมี worker เดียว จอง Seat 10 สำเร็จ 1 client; อีก 4 client ได้ผลล้มเหลวเพราะที่นั่งถูกจองแล้ว
+ผลที่ควรเห็น: server ประมวลผลทีละ request เพราะมี worker เดียว จอง Seat 10 สำเร็จ 1 client; client ที่เหลือได้ผลล้มเหลวเพราะที่นั่งถูกจองแล้ว ค่าเริ่มต้นคือ 5 clients และเมนูเลือกได้ 5–100
 
 ผลบันทึก: `results/demos/concurrent/<เวลา UTC>/report.txt` ระบุ `Experiment: sequential`, จำนวน workers และผลราย client; โฟลเดอร์เดียวกันมี server logs และ `clients/`
 
@@ -110,7 +134,7 @@ PowerShell:
 & "$env:ProgramFiles\Git\bin\bash.exe" -lc "bash scripts/concurrent-test.sh"
 ```
 
-ผลที่ควรเห็น: อาจมี client มากกว่า 1 คนได้รับผลจอง Seat 10 สำเร็จ เพราะ workers อ่านสถานะก่อนเขียนทับกัน นี่เป็น race condition; ผลแต่ละรอบไม่รับประกันว่าจะเกิด ถ้ายังเห็นผู้ชนะเพียงคนเดียว ให้หยุด server เริ่ม `nosync` ใหม่ แล้วรันสคริปต์ซ้ำ
+ผลที่ควรเห็น: อาจมี client มากกว่า 1 คนได้รับผลจอง Seat 10 สำเร็จ เพราะ workers อ่านสถานะก่อนเขียนทับกัน นี่เป็น race condition; ผลแต่ละรอบไม่รับประกันว่าจะเกิด ถ้ายังเห็นผู้ชนะเพียงคนเดียว ให้หยุด server เริ่ม `nosync` ใหม่ แล้วรันสคริปต์ซ้ำ ค่าเริ่มต้นคือ 5 clients และเมนูเลือกได้ 5–100
 
 ผลบันทึก: `results/demos/concurrent/<เวลา UTC>/report.txt` ระบุ `Experiment: nosync`, จำนวน workers และจำนวนผู้จองสำเร็จ; โฟลเดอร์เดียวกันมี server logs และ `clients/`
 
@@ -132,7 +156,7 @@ PowerShell:
 & "$env:ProgramFiles\Git\bin\bash.exe" -lc "bash scripts/concurrent-test.sh"
 ```
 
-ผลที่ควรเห็น: จอง Seat 10 สำเร็จ 1 client; อีก 4 client ล้มเหลวเพราะ mutex ทำให้ workers ตรวจและอัปเดตที่นั่งทีละคน เทียบกับ Experiment 2 เพื่อดูผลของ synchronization
+ผลที่ควรเห็น: จอง Seat 10 สำเร็จ 1 client; client ที่เหลือล้มเหลวเพราะ mutex ทำให้ workers ตรวจและอัปเดตที่นั่งทีละคน เทียบกับ Experiment 2 เพื่อดูผลของ synchronization ค่าเริ่มต้นคือ 5 clients และเมนูเลือกได้ 5–100
 
 ผลบันทึก: `results/demos/concurrent/<เวลา UTC>/report.txt` ระบุ `Experiment: sync`, จำนวน workers และผลราย client; โฟลเดอร์เดียวกันมี server logs และ `clients/`
 
@@ -179,12 +203,12 @@ docker run -d --rm --name airplane-reservation airplane-reservation:latest ./ser
 .\scripts\load-test.ps1 50000 100 RESERVE 10
 ```
 
-argument คือจำนวน request, concurrency (จำนวน threads), operation `STATUS`/`RESERVE`/`CANCEL` และ seat ID ที่ไม่บังคับ หากไม่ระบุ seat ID โปรแกรมจะวน 1–20 `load_test` ใช้ client ID ต่างกันต่อ request ไม่ใช่เปิด containers เพิ่ม
+argument คือจำนวน request, concurrency (จำนวน threads หรือ logical clients), operation `STATUS`/`RESERVE`/`CANCEL` และ seat ID ที่ไม่บังคับ หากไม่ระบุ seat ID โปรแกรมจะวน 1–20 แต่ละ thread ใช้ client ID เดิมตลอดรอบและส่งคำขอของตัวเองทีละรายการ เช่น `50000 100` คือ 100 logical clients ส่งรวม 50,000 requests ไม่ได้เปิด `./client` หรือ containers เพิ่ม
 
-PowerShell wrapper ตรวจโหมดและจำนวน workers จาก server container ที่กำลังรัน บันทึก `output.log`, `server.log` และ `summary.txt` ใต้ `results/load-tests/<เวลา UTC>/` หากใช้ Git Bash สามารถเรียก binary โดยตรง:
+PowerShell/Bash wrapper ตรวจโหมดและจำนวน workers จาก server container ที่กำลังรัน และบันทึก `report.txt` ที่อ่านง่าย, `output.log` ฉบับเต็ม, `server.log` และ `summary.txt` สำหรับ CI ใต้ `results/load-tests/<เวลา UTC>/` หากใช้ Git Bash สามารถเรียก binary โดยตรง:
 
 ```bash
-bash scripts/container.sh exec ./load_test 1000 20 STATUS
+bash scripts/load-test.sh 1000 20 STATUS
 ```
 
 `Throughput` นับคำขอที่ได้รับ response ต่อวินาที รวม response ที่บอกว่าจองไม่สำเร็จด้วย ดังนั้น `RESERVE 10` ซ้ำ 50,000 ครั้งจะมีผู้ชนะอย่างมากหนึ่งรายในโหมด `sync` ส่วนคำขอที่เหลือยังนับเป็น completed requests

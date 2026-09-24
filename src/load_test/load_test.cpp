@@ -1,7 +1,6 @@
 #include "../constants/constants.h"
 #include "../ipc/message_queue.h"
 #include "../utils/cli_parser.h"
-#include <atomic>
 #include <chrono>
 #include <limits>
 #include <iostream>
@@ -110,12 +109,12 @@ void recordResponse(
 void sendRequest(
     int requestQueueId,
     int responseQueueId,
+    int clientId,
     int requestNumber,
     Operation operation,
     int fixedSeatId,
     LoadTestResult& result
 ) {
-    int clientId = 10000 + requestNumber;
     int seatId = getSeatId(requestNumber, fixedSeatId);
     string command = makeCommand(operation, seatId);
 
@@ -181,8 +180,8 @@ int main(int argc, char* argv[]) {
         concurrency = totalRequests;
     }
 
-    if (totalRequests > numeric_limits<int>::max() - 10000) {
-        cerr << "Too many requests for the client ID range\n";
+    if (concurrency > numeric_limits<int>::max() - 10000) {
+        cerr << "Too many logical clients for the client ID range\n";
         return 1;
     }
     int requestQueueId;
@@ -226,19 +225,17 @@ int main(int argc, char* argv[]) {
 
     LoadTestResult result;
     auto testStart = chrono::steady_clock::now();
-    atomic<long long> nextRequest{0};
     vector<thread> threads;
     bool launchFailed = false;
     try {
         for (int i = 0; i < concurrency; ++i) {
-            threads.emplace_back([&] {
-                while (true) {
-                    const auto requestNumber = nextRequest.fetch_add(1);
-                    if (requestNumber >= totalRequests) {
-                        break;
-                    }
+            threads.emplace_back([&, i] {
+                const int clientId = 10000 + i;
+                for (long long requestNumber = i; requestNumber < totalRequests;
+                     requestNumber += concurrency) {
                     sendRequest(
                         requestQueueId, responseQueueId,
+                        clientId,
                         static_cast<int>(requestNumber),
                         operation, fixedSeatId, result
                     );
