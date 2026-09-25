@@ -9,6 +9,9 @@ FAIL_COUNT=0
 TEST_DIR="${TMPDIR:-/tmp}/airplane-reservation-tui-tests-$$"
 mkdir -p "$TEST_DIR"
 trap 'rm -rf "$TEST_DIR"' EXIT
+MOCK_DOCKER="$TEST_DIR/docker-mock"
+cp "$ROOT_DIR/tests/fixtures/docker-mock.sh" "$MOCK_DOCKER"
+chmod +x "$MOCK_DOCKER"
 
 ALT_ENTER=$'\033[?1049h'
 ALT_LEAVE=$'\033[?1049l'
@@ -79,7 +82,7 @@ run_menu_with_mock_docker() {
     MOCK_TRACE="$TEST_DIR/docker-calls.log" \
     MOCK_FAIL= \
     MOCK_SERVER_COMMAND='["./server","sync","3"]' \
-    DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+    DOCKER="$MOCK_DOCKER" \
     RUNTIME=container \
     timeout 5s bash scripts/menu.sh >"$output" 2>&1
 }
@@ -90,7 +93,7 @@ render_server_status_with_mock_docker() {
     MOCK_TRACE="$TEST_DIR/docker-calls.log" \
     MOCK_FAIL= \
     MOCK_SERVER_COMMAND='["./server","sync","3"]' \
-    DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+    DOCKER="$MOCK_DOCKER" \
     RUNTIME=container \
     MENU_LIBRARY_ONLY=yes \
     timeout 5s bash -c 'source scripts/menu.sh; show_status' >"$output" 2>&1
@@ -179,7 +182,7 @@ OUTPUT="$TEST_DIR/stop-server.raw"
 if printf '\n' | \
   MOCK_TRACE="$TEST_DIR/docker-calls.log" \
   MOCK_FAIL= \
-  DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+  DOCKER="$MOCK_DOCKER" \
   RUNTIME=container \
   MENU_LIBRARY_ONLY=yes \
   timeout 5s bash -c 'source scripts/menu.sh; stop_server_menu' >"$OUTPUT" 2>&1; then
