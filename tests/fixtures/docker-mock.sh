@@ -25,6 +25,14 @@ case "$command" in
         *'org.airplane-reservation.managed'*) echo true ;;
         *) echo "Unexpected inspect format: $format" >&2; exit 45 ;;
       esac
+    elif [ -n "${MOCK_REMOVAL_POLLS_FILE:-}" ]; then
+      remaining="$(cat "$MOCK_REMOVAL_POLLS_FILE")"
+      if [ "$remaining" -gt 0 ]; then
+        printf '%s\n' "$((remaining - 1))" >"$MOCK_REMOVAL_POLLS_FILE"
+        echo '[]'
+      else
+        exit 1
+      fi
     else
       echo "Unexpected inspect call: $*" >&2
       exit 45

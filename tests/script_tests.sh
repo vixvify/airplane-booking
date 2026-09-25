@@ -38,6 +38,14 @@ if grep -q '^compose ' "$MOCK_TRACE"; then
 fi
 echo "[PASS] Docker commands survive an executable path containing spaces"
 
+removal_polls="$TEST_DIR/removal-polls.txt"
+printf '2\n' >"$removal_polls"
+MOCK_REMOVAL_POLLS_FILE="$removal_polls" \
+  bash "$ROOT_DIR/scripts/container.sh" stop >/dev/null
+[ "$(cat "$removal_polls")" = 0 ] ||
+  fail "container stop returned before Docker released the container name"
+echo "[PASS] container stop waits until Docker releases the container name"
+
 if bash "$ROOT_DIR/scripts/container.sh" start unknown \
   >"$TEST_DIR/invalid-experiment.log" 2>&1; then
   fail "unknown experiment was accepted"
@@ -174,4 +182,4 @@ done
 grep -q '^Workers: 5$' "$demo_report" ||
   fail "Demo 1 report did not record the running worker count"
 echo "[PASS] Demo 1 report includes reservation and cancellation totals"
-echo "Script tests: 18 passed, 0 failed (mock Docker transport)"
+echo "Script tests: 19 passed, 0 failed (mock Docker transport)"
