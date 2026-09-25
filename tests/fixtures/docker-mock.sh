@@ -52,7 +52,18 @@ case "$command" in
           case "$operation" in
             LIST)
               echo "===== Airplane Seat Map ====="
-              for seat_id in {1..20}; do echo "Seat $seat_id : AVAILABLE"; done
+              for seat_id in {1..20}; do
+                if [ "${MOCK_DEMO_FINAL:-}" = 1 ]; then
+                  case "$seat_id" in
+                    2) echo "Seat 2 : RESERVED by Client-1"; continue ;;
+                    3) echo "Seat 3 : RESERVED by Client-2"; continue ;;
+                    6) echo "Seat 6 : RESERVED by Client-3"; continue ;;
+                    7) echo "Seat 7 : RESERVED by Client-4"; continue ;;
+                    10) echo "Seat 10 : RESERVED by Client-5"; continue ;;
+                  esac
+                fi
+                echo "Seat $seat_id : AVAILABLE"
+              done
               echo "============================="
               ;;
             STATUS) echo "Seat $seat is AVAILABLE" ;;
@@ -60,10 +71,10 @@ case "$command" in
               if [ "${MOCK_RESERVE_FAIL_CLIENT:-}" = "client-$id" ]; then
                 echo "FAILED: Transaction cancelled because Seat $seat is already reserved"
               else
-                echo "SUCCESS: Seat $seat reserved"
+                for seat_id in $seat; do echo "SUCCESS: Seat $seat_id reserved"; done
               fi
               ;;
-            CANCEL) echo "SUCCESS: Seat $seat cancelled" ;;
+            CANCEL) for seat_id in $seat; do echo "SUCCESS: Seat $seat_id cancelled"; done ;;
             QUIT) echo GOODBYE ;;
           esac
         done

@@ -44,6 +44,9 @@ if [ "$DEMO_NAME" = demo1 ]; then
   CLIENT_COUNT=5
   COMMAND=mixed
   SEAT_ID=various
+  DEMO_RESERVE_SEATS=("1 2" "3 4" "5 6" "7 8" "9 10")
+  DEMO_CANCEL_SEATS=(1 4 5 8 9)
+  DEMO_REMAINING_SEATS=(2 3 6 7 10)
 else
   CLIENT_COUNT="${CLIENT_COUNT:-5}"
   [[ "$CLIENT_COUNT" =~ ^[0-9]+$ ]] && [ "$CLIENT_COUNT" -ge 5 ] && [ "$CLIENT_COUNT" -le 100 ] || {
@@ -112,8 +115,9 @@ run_client() {
 
 write_report() {
   local report="$RUN_DIR/report.txt"
-  local id seat file command_status cancel_status failure_reason response
-  local success_count=0 failed_count=0 cancelled_count=0
+  local id seat file command_status cancel_status final_status failure_reason response
+  local reserve_seats reserve_display cancel_seat remaining_seat reservation_ok total_reservations
+  local success_count=0 failed_count=0 cancelled_count=0 remaining_count=0
 
   if [ "$DEMO_NAME" = demo1 ]; then
     printf '%s\n' '============================================================================' >"$report"
@@ -123,8 +127,8 @@ write_report() {
     printf 'Experiment: %s\nWorkers: %s\nClients: %s\nCommand: mixed\nStarted at: %s\n\n' \
       "$EXPERIMENT" "${WORKER_COUNT:-unknown}" "$CLIENT_COUNT" "$STARTED_AT" >>"$report"
     printf '%s\n' 'CLIENT RESULTS' '--------------' >>"$report"
-    printf '%-10s | %-34s | %s\n' 'Client' 'Reservation' 'Cancellation' >>"$report"
-    printf '%s\n' '-----------|------------------------------------|-------------' >>"$report"
+    printf '%-10s | %-28s | %-21s | %s\n' 'Client' 'Reserved seats' 'Cancelled seat' 'Remains reserved' >>"$report"
+    printf '%s\n' '-----------|------------------------------|-----------------------|-----------------' >>"$report"
   else
     printf '%s\n' '============================================================================' >"$report"
     printf '%s\n' 'AIRPLANE RESERVATION - CONCURRENT COMMAND RESULT' >>"$report"
@@ -140,18 +144,29 @@ write_report() {
 
   for ((id = 1; id <= CLIENT_COUNT; ++id)); do
     file="$RUN_DIR/clients/client-$id/output.log"
-    if [ "$DEMO_NAME" = demo1 ]; then seat="$id"; else seat="$SEAT_ID"; fi
 
     if [ "$DEMO_NAME" = demo1 ]; then
-      if grep -Fqx "SUCCESS: Seat $seat reserved" "$file"; then
-        command_status="SUCCESS (Seat $seat)"
-        success_count=$((success_count + 1))
+      reserve_seats="${DEMO_RESERVE_SEATS[id-1]}"
+      cancel_seat="${DEMO_CANCEL_SEATS[id-1]}"
+      remaining_seat="${DEMO_REMAINING_SEATS[id-1]}"
+      reserve_display="${reserve_seats// /, }"
+      reservation_ok=true
+      for seat in $reserve_seats; do
+        if grep -Fqx "SUCCESS: Seat $seat reserved" "$file"; then
+          success_count=$((success_count + 1))
+        else
+          failed_count=$((failed_count + 1))
+          reservation_ok=false
+        fi
+      done
+      if [ "$reservation_ok" = true ]; then
+        command_status="SUCCESS (Seats $reserve_display)"
       else
         failure_reason="$(grep -m1 '^FAILED:' "$file" | sed 's/^FAILED: //' || true)"
         command_status="FAILED${failure_reason:+: $failure_reason}"
-        failed_count=$((failed_count + 1))
       fi
     else
+      seat="$SEAT_ID"
       response=""
       case "$COMMAND" in
         RESERVE) response="$(grep -Fx "SUCCESS: Seat $seat reserved" "$file" || true)" ;;
@@ -174,13 +189,20 @@ write_report() {
     fi
 
     if [ "$DEMO_NAME" = demo1 ]; then
-      if grep -Fqx "SUCCESS: Seat $seat cancelled" "$file"; then
-        cancel_status="SUCCESS"
+      if grep -Fqx "SUCCESS: Seat $cancel_seat cancelled" "$file"; then
+        cancel_status="SUCCESS (Seat $cancel_seat)"
         cancelled_count=$((cancelled_count + 1))
       else
-        cancel_status="FAILED"
+        cancel_status="FAILED (Seat $cancel_seat)"
       fi
-      printf '%-10s | %-34s | %s\n' "client-$id" "$command_status" "$cancel_status" >>"$report"
+      if grep -Fqx "Seat $remaining_seat : RESERVED by Client-$id" "$RUN_DIR/seat-map.txt"; then
+        final_status="SUCCESS (Seat $remaining_seat)"
+        remaining_count=$((remaining_count + 1))
+      else
+        final_status="FAILED (Seat $remaining_seat)"
+      fi
+      printf '%-10s | %-28s | %-21s | %s\n' \
+        "client-$id" "$command_status" "$cancel_status" "$final_status" >>"$report"
     else
       printf '%-10s | %s\n' "client-$id" "$command_status" >>"$report"
     fi
@@ -188,9 +210,11 @@ write_report() {
 
   printf '\n%s\n%s\n' 'SUMMARY' '-------' >>"$report"
   if [ "$DEMO_NAME" = demo1 ]; then
-    printf 'Successful reservations: %s/%s\nFailed reservations: %s/%s\n' \
-      "$success_count" "$CLIENT_COUNT" "$failed_count" "$CLIENT_COUNT" >>"$report"
+    total_reservations=$((CLIENT_COUNT * 2))
+    printf 'Successful seat reservations: %s/%s\nFailed seat reservations: %s/%s\n' \
+      "$success_count" "$total_reservations" "$failed_count" "$total_reservations" >>"$report"
     printf 'Successful cancellations: %s/%s\n' "$cancelled_count" "$CLIENT_COUNT" >>"$report"
+    printf 'Seats remaining reserved: %s/%s\n' "$remaining_count" "$CLIENT_COUNT" >>"$report"
   elif [ "$COMMAND" = RESERVE ]; then
     printf 'Successful reservations: %s/%s\nFailed reservations: %s/%s\n' \
       "$success_count" "$CLIENT_COUNT" "$failed_count" "$CLIENT_COUNT" >>"$report"
@@ -217,22 +241,22 @@ write_report() {
 }
 
 if [ "$DEMO_NAME" = demo1 ]; then
-  ui_note "Five clients run mixed commands on Seats 1-5."
+  ui_note "Five clients reserve two seats each, cancel one, and keep one reserved on Seats 1-10."
   mkdir -p "$RUN_DIR/preflight"
   printf 'LIST\nQUIT\n' | runtime_client 1 >"$RUN_DIR/preflight/list.log"
-  for id in 1 2 3 4 5; do
+  for preflight_seat in {1..10}; do
     # Check through STATUS so preconditions do not depend on LIST formatting.
-    printf 'STATUS %s\nQUIT\n' "$id" | runtime_client "$id" >"$RUN_DIR/preflight/client-$id.log"
-    grep -q "Seat $id is AVAILABLE" "$RUN_DIR/preflight/client-$id.log" || {
-      echo "Seat $id is already reserved; restart the server before Demo 1." >&2; exit 1;
+    printf 'STATUS %s\nQUIT\n' "$preflight_seat" | runtime_client 1 >"$RUN_DIR/preflight/seat-$preflight_seat.log"
+    grep -q "Seat $preflight_seat is AVAILABLE" "$RUN_DIR/preflight/seat-$preflight_seat.log" || {
+      echo "Seat $preflight_seat is already reserved; restart the server before Demo 1." >&2; exit 1;
     }
   done
   commands=(
-    $'LIST\nRESERVE 1\nSTATUS 1\nCANCEL 1\nQUIT\n'
-    $'STATUS 2\nRESERVE 2\nCANCEL 2\nSTATUS 2\nQUIT\n'
-    $'RESERVE 3\nLIST\nCANCEL 3\nSTATUS 3\nQUIT\n'
-    $'RESERVE 4\nSTATUS 4\nCANCEL 4\nLIST\nQUIT\n'
-    $'LIST\nRESERVE 5\nCANCEL 5\nSTATUS 5\nQUIT\n'
+    $'LIST\nRESERVE 1 2\nSTATUS 1\nCANCEL 1\nSTATUS 2\nQUIT\n'
+    $'STATUS 3\nRESERVE 3 4\nCANCEL 4\nSTATUS 3\nLIST\nQUIT\n'
+    $'RESERVE 5 6\nLIST\nCANCEL 5\nSTATUS 6\nQUIT\n'
+    $'RESERVE 7 8\nSTATUS 8\nCANCEL 8\nLIST\nSTATUS 7\nQUIT\n'
+    $'LIST\nRESERVE 9 10\nCANCEL 9\nSTATUS 10\nQUIT\n'
   )
 else
   if [ "$COMMAND" = CANCEL ]; then
@@ -312,15 +336,21 @@ for ((id = 1; id <= CLIENT_COUNT; ++id)); do
   file="$RUN_DIR/clients/client-$id/output.log"
   grep -q '^GOODBYE$' "$file" || failed=1
   if [ "$DEMO_NAME" = demo1 ]; then
-    grep -q "^SUCCESS: Seat $id reserved" "$file" || failed=1
-    grep -q "^SUCCESS: Seat $id cancelled" "$file" || failed=1
+    for seat in ${DEMO_RESERVE_SEATS[id-1]}; do
+      grep -Fqx "SUCCESS: Seat $seat reserved" "$file" || failed=1
+    done
+    cancel_seat="${DEMO_CANCEL_SEATS[id-1]}"
+    remaining_seat="${DEMO_REMAINING_SEATS[id-1]}"
+    grep -Fqx "SUCCESS: Seat $cancel_seat cancelled" "$file" || failed=1
+    grep -Fqx "Seat $cancel_seat : AVAILABLE" "$RUN_DIR/seat-map.txt" || failed=1
+    grep -Fqx "Seat $remaining_seat : RESERVED by Client-$id" "$RUN_DIR/seat-map.txt" || failed=1
     if grep -Eq '^(FAILED:|ERROR:|Usage:)' "$file"; then failed=1; fi
   fi
 done
 if [ "$failed" -ne 0 ]; then exit 1; fi
 
 if [ "$DEMO_NAME" = demo1 ]; then
-  ui_success "Demo 1 finished: all five clients reserved and cancelled their own seats."
+  ui_success "Demo 1 finished: each client reserved two seats, cancelled one, and kept one reserved."
 else
   ui_success "Concurrent $COMMAND test finished."
   if [ "$COMMAND" = RESERVE ] || [ "$COMMAND" = CANCEL ]; then

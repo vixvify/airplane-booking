@@ -138,7 +138,7 @@ if [ "$log_status" -ne 0 ]; then
   ui_error "Load test passed, but server logs could not be saved. Evidence: $RUN_DIR"
   exit "$log_status"
 fi
-ui_render_report "$RUN_DIR/report.txt"
+ui_render_load_report "$RUN_DIR/report.txt"
 if [ "$seat_map_available" = true ]; then
   ui_render_seat_map "$RUN_DIR/seat-map.txt" "$RUN_DIR/seat-conflicts.txt"
 else

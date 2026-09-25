@@ -77,9 +77,23 @@ run_menu_with_mock_docker() {
   local output="$2"
   printf '%b' "$keys" | \
     MOCK_TRACE="$TEST_DIR/docker-calls.log" \
+    MOCK_FAIL= \
+    MOCK_SERVER_COMMAND='["./server","sync","3"]' \
     DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
     RUNTIME=container \
     timeout 5s bash scripts/menu.sh >"$output" 2>&1
+}
+
+render_server_status_with_mock_docker() {
+  local output="$1"
+  printf '\n' | \
+    MOCK_TRACE="$TEST_DIR/docker-calls.log" \
+    MOCK_FAIL= \
+    MOCK_SERVER_COMMAND='["./server","sync","3"]' \
+    DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+    RUNTIME=container \
+    MENU_LIBRARY_ONLY=yes \
+    timeout 5s bash -c 'source scripts/menu.sh; show_status' >"$output" 2>&1
 }
 
 printf 'Running terminal UI tests...\n\n'
@@ -147,10 +161,10 @@ assert_count "$OUTPUT" 2 "$ALT_LEAVE" 'Action output uses the normal scrollback 
 assert_count "$OUTPUT" 2 "$ALT_ENTER" 'Menu resumes in the alternate screen after Enter'
 
 OUTPUT="$TEST_DIR/server-status.raw"
-if run_menu_with_mock_docker "${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}\n\nq" "$OUTPUT"; then
-  pass 'Server Status returns to the menu after Enter'
+if render_server_status_with_mock_docker "$OUTPUT"; then
+  pass 'Server Status renders and accepts Enter'
 else
-  fail 'Server Status returns to the menu after Enter'
+  fail 'Server Status renders and accepts Enter'
 fi
 assert_contains "$OUTPUT" 'AIRPLANE RESERVATION - SERVER STATUS' 'Server Status has a clear title'
 assert_contains "$OUTPUT" 'Server is running and ready.' 'Server Status highlights the running state'
@@ -160,6 +174,21 @@ assert_contains "$OUTPUT" 'Workers            : 3' 'Server Status displays the w
 assert_contains "$OUTPUT" 'Container          : airplane-reservation' 'Server Status displays the container name'
 assert_contains "$OUTPUT" 'Image              : airplane-reservation:latest' 'Server Status displays the image name'
 assert_count "$OUTPUT" 1 "$CLEAR_SCROLLBACK" 'Server Status clears logs from the previous command'
+
+OUTPUT="$TEST_DIR/stop-server.raw"
+if printf '\n' | \
+  MOCK_TRACE="$TEST_DIR/docker-calls.log" \
+  MOCK_FAIL= \
+  DOCKER="$ROOT_DIR/tests/fixtures/docker-mock.sh" \
+  RUNTIME=container \
+  MENU_LIBRARY_ONLY=yes \
+  timeout 5s bash -c 'source scripts/menu.sh; stop_server_menu' >"$OUTPUT" 2>&1; then
+  pass 'Stop Server renders and accepts Enter'
+else
+  fail 'Stop Server renders and accepts Enter'
+fi
+assert_contains "$OUTPUT" 'AIRPLANE RESERVATION - STOP SERVER' 'Stop Server has a clear title'
+assert_count "$OUTPUT" 1 "$CLEAR_SCROLLBACK" 'Stop Server clears logs from the previous command'
 
 OUTPUT="$TEST_DIR/output-reset.raw"
 if MENU_LIBRARY_ONLY=yes bash -c 'source scripts/menu.sh; begin_output_screen' >"$OUTPUT" 2>&1; then
@@ -193,6 +222,53 @@ assert_contains "$OUTPUT" '[FAIL] Failed reservations: 4/5' 'Result renderer hig
 assert_contains "$OUTPUT" 'client-1   | SUCCESS (Seat 10)' 'Result renderer preserves per-client success details'
 assert_contains "$OUTPUT" 'client-2   | FAILED: already reserved' 'Result renderer preserves per-client failure details'
 
+LOAD_REPORT_SAMPLE="$TEST_DIR/load-report-sample.txt"
+printf '%s\n' \
+  'AIRPLANE RESERVATION - LOAD TEST RESULT' \
+  'CONFIGURATION' \
+  'Experiment: sync' \
+  'Workers: 3' \
+  'Total requests: 50000' \
+  'Concurrency: 100' \
+  'Operation: RESERVE' \
+  'Target seat: 10' \
+  'Started at: 2026-09-25T00:00:00Z' \
+  'RESULTS' \
+  'Completed: 50000' \
+  'Transport failures: 0' \
+  'Operation succeeded: 1' \
+  'Operation failed: 49999' \
+  'Completion rate: 100%' \
+  'Total time: 9.35645 sec' \
+  'Throughput: 5343.91 req/sec' \
+  'Average latency: 18.6777 ms' \
+  'Consistency check: PASSED' \
+  'ARTIFACTS' \
+  'Raw benchmark output: output.log' \
+  'Seat map snapshot: seat-map.txt' \
+  'Conflict evidence: seat-conflicts.txt' \
+  'Server log: server.log' \
+  'Machine-readable summary: summary.txt' >"$LOAD_REPORT_SAMPLE"
+OUTPUT="$TEST_DIR/load-report-renderer.raw"
+if NO_COLOR=1 FORCE_COLOR=1 bash -c \
+  'source scripts/lib/terminal_ui.sh; ui_render_load_report "$1"' \
+  _ "$LOAD_REPORT_SAMPLE" >"$OUTPUT" 2>&1; then
+  pass 'Load-test renderer formats a performance dashboard'
+else
+  fail 'Load-test renderer formats a performance dashboard'
+fi
+assert_contains "$OUTPUT" '[ RUN OVERVIEW ]' 'Load dashboard separates run configuration'
+assert_contains "$OUTPUT" '[ PERFORMANCE ]' 'Load dashboard has a performance section'
+assert_contains "$OUTPUT" 'THROUGHPUT' 'Load dashboard highlights throughput'
+assert_contains "$OUTPUT" '5343.91 req/sec' 'Load dashboard preserves throughput value'
+assert_contains "$OUTPUT" '18.6777 ms' 'Load dashboard preserves average latency value'
+assert_contains "$OUTPUT" '9.35645 sec' 'Load dashboard preserves total time value'
+assert_contains "$OUTPUT" '████████████████████████████' 'Load dashboard renders a full completion bar'
+assert_contains "$OUTPUT" '50,000 / 50,000 responses' 'Load dashboard groups large request counts'
+assert_contains "$OUTPUT" '49,999 rejected/failed' 'Load dashboard distinguishes operation rejection from transport failure'
+assert_contains "$OUTPUT" '[PASS] PASSED' 'Load dashboard highlights consistency status'
+assert_contains "$OUTPUT" '[ SAVED ARTIFACTS ]' 'Load dashboard groups saved evidence'
+
 SEAT_MAP_SAMPLE="$TEST_DIR/seat-map-sample.txt"
 for seat in {1..20}; do
   if [ "$seat" -eq 2 ]; then
@@ -224,8 +300,8 @@ assert_contains "$OUTPUT" '▲ FRONT' 'Seat map marks the front clearly'
 assert_contains "$OUTPUT" '▼ TAIL' 'Seat map marks the tail clearly'
 assert_contains "$OUTPUT" '● 19 available' 'Seat map totals available seats'
 assert_contains "$OUTPUT" '● 1 reserved' 'Seat map totals reserved seats'
-assert_contains "$OUTPUT" '[10:C-1]' 'Seat map legend uses a concrete owner example'
-assert_not_contains "$OUTPUT" 'Client-n' 'Seat map legend does not show a placeholder as data'
+assert_not_contains "$OUTPUT" '[10:C-1] reserved' 'Seat map does not show a hard-coded owner legend'
+assert_not_contains "$OUTPUT" 'Client-n' 'Seat map does not show a placeholder as data'
 
 CONFLICT_SAMPLE="$TEST_DIR/seat-conflicts-sample.txt"
 printf '2|Client-2, Client-7, Client-9|Client-42\n' >"$CONFLICT_SAMPLE"
@@ -238,6 +314,8 @@ else
 fi
 assert_contains "$OUTPUT" '[02:RACE]' 'Conflicted seat is marked as RACE instead of one apparent winner'
 assert_contains "$OUTPUT" '⚠ 1 conflict' 'Seat map totals detected conflicts'
+assert_contains "$OUTPUT" '⚠ RACE = multiple clients received SUCCESS' 'Conflict legend explains the race marker without a fake owner'
+assert_not_contains "$OUTPUT" '[10:C-1] reserved' 'Conflict map does not show a hard-coded owner legend'
 assert_contains "$OUTPUT" '[FAIL] CONSISTENCY CHECK' 'Seat map fails its consistency check'
 assert_contains "$OUTPUT" 'SUCCESS clients: Client-2, Client-7, Client-9' 'Conflict evidence lists every successful client'
 assert_contains "$OUTPUT" 'Final stored owner: Client-42 (last write won)' 'Conflict evidence distinguishes final memory from successful replies'

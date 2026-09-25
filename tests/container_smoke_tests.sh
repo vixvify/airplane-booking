@@ -112,11 +112,13 @@ output="$(bash "$ROOT_DIR/scripts/concurrent-test.sh")"
   fail "custom synchronized worker count should have exactly one winner"
 [[ "$output" == *"Workers: 5"* ]] ||
   fail "concurrent report should record custom worker count"
+start_experiment sync 5
 demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
-[[ "$demo_output" == *"Successful cancellations: 5/5"* ]] ||
+[[ "$demo_output" == *"Seats remaining reserved: 5/5"* ]] ||
   fail "Demo 1 should work with a custom worker count"
 pass "custom worker count works with both demo scripts"
 
+start_experiment sync 5
 command_output="$(
   printf 'STATUS 1\nRESERVE 1 2\nSTATUS 1\nCANCEL 1 2\nSTATUS 1\nQUIT\n' |
     container exec -i ./client 1
@@ -139,13 +141,19 @@ for expected in "Completed       : 1000" "Transport Fail  : 0" "Throughput"; do
 done
 pass "load test and throughput"
 
+start_experiment sync 5
 demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
-[[ "$demo_output" == *"all five clients reserved and cancelled"* ]] ||
+[[ "$demo_output" == *"each client reserved two seats, cancelled one, and kept one reserved"* ]] ||
   fail "Demo 1 did not complete successfully"
-[[ "$demo_output" == *"Successful reservations: 5/5"* ]] ||
-  fail "Demo 1 report should show five successful reservations"
+[[ "$demo_output" == *"Successful seat reservations: 10/10"* ]] ||
+  fail "Demo 1 report should show ten successful seat reservations"
 [[ "$demo_output" == *"Successful cancellations: 5/5"* ]] ||
   fail "Demo 1 report should show five successful cancellations"
+[[ "$demo_output" == *"Seats remaining reserved: 5/5"* ]] ||
+  fail "Demo 1 report should show five seats still reserved"
+for expected in '[02:C-1]' '[03:C-2]' '[06:C-3]' '[07:C-4]' '[10:C-5]'; do
+  [[ "$demo_output" == *"$expected"* ]] || fail "Demo 1 final seat map missed $expected"
+done
 pass "Demo 1 mixed commands"
 
 export AIRPLANE_LOG_MODE=quiet

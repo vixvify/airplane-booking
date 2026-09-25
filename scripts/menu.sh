@@ -406,7 +406,7 @@ show_status() {
 
 stop_server_menu() {
   invalidate_frame
-  leave_screen
+  begin_output_screen
   ui_banner "AIRPLANE RESERVATION - STOP SERVER"
   if bash "$CONTAINER_SCRIPT" status >/dev/null 2>&1; then
     bash "$CONTAINER_SCRIPT" stop

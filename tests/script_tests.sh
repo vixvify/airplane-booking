@@ -153,13 +153,24 @@ grep -q 'COMMAND must be LIST, STATUS, RESERVE, or CANCEL' "$TEST_DIR/invalid-co
   fail "unsupported command error was unclear"
 echo "[PASS] concurrent test rejects unsupported commands"
 
-demo_output="$(bash "$ROOT_DIR/scripts/demo1.sh")"
+demo_output="$(MOCK_DEMO_FINAL=1 bash "$ROOT_DIR/scripts/demo1.sh")"
 demo_report="$(sed -n 's/^Report saved in: //p' <<<"$demo_output" | tail -n 1)"
 [ -f "$demo_report" ] || fail "Demo 1 reservation report was not saved"
-grep -q 'Successful reservations: 5/5' "$demo_report" ||
-  fail "Demo 1 report is missing reservation totals"
+grep -q 'Successful seat reservations: 10/10' "$demo_report" ||
+  fail "Demo 1 report is missing multi-seat reservation totals"
 grep -q 'Successful cancellations: 5/5' "$demo_report" ||
   fail "Demo 1 report is missing cancellation totals"
+grep -q 'Seats remaining reserved: 5/5' "$demo_report" ||
+  fail "Demo 1 report is missing final reserved-seat totals"
+demo_seat_map="$(dirname "$demo_report")/seat-map.txt"
+for expected in \
+  'Seat 2 : RESERVED by Client-1' \
+  'Seat 3 : RESERVED by Client-2' \
+  'Seat 6 : RESERVED by Client-3' \
+  'Seat 7 : RESERVED by Client-4' \
+  'Seat 10 : RESERVED by Client-5'; do
+  grep -Fqx "$expected" "$demo_seat_map" || fail "Demo 1 final seat map is missing: $expected"
+done
 grep -q '^Workers: 5$' "$demo_report" ||
   fail "Demo 1 report did not record the running worker count"
 echo "[PASS] Demo 1 report includes reservation and cancellation totals"

@@ -120,6 +120,131 @@ ui_render_report() {
   done <"$report"
 }
 
+ui_report_value() {
+  local report="$1" label="$2" value
+  value="$(sed -n "s/^${label}:[[:space:]]*//p" "$report" | tail -n 1)"
+  printf '%s' "${value:-not available}"
+}
+
+ui_group_integer() {
+  local digits="$1" grouped=""
+  if [[ ! "$digits" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$digits"
+    return
+  fi
+  while [ "${#digits}" -gt 3 ]; do
+    grouped=",${digits: -3}$grouped"
+    digits="${digits:0:${#digits}-3}"
+  done
+  printf '%s%s' "$digits" "$grouped"
+}
+
+ui_render_load_report() {
+  local report="$1"
+  local experiment workers total_requests concurrency operation target started_at
+  local completed transport_fail operation_ok operation_fail completion_rate
+  local total_time throughput average_latency consistency
+  local raw_output seat_map conflicts server_log summary
+  local rate_number rate_integer bar_width=28 filled empty filled_bar empty_bar
+
+  if [ ! -t 1 ] && [ "${FORCE_COLOR:-0}" != 1 ]; then
+    cat "$report"
+    return
+  fi
+
+  experiment="$(ui_report_value "$report" 'Experiment')"
+  workers="$(ui_report_value "$report" 'Workers')"
+  total_requests="$(ui_report_value "$report" 'Total requests')"
+  concurrency="$(ui_report_value "$report" 'Concurrency')"
+  operation="$(ui_report_value "$report" 'Operation')"
+  target="$(ui_report_value "$report" 'Target seat')"
+  started_at="$(ui_report_value "$report" 'Started at')"
+  completed="$(ui_report_value "$report" 'Completed')"
+  transport_fail="$(ui_report_value "$report" 'Transport failures')"
+  operation_ok="$(ui_report_value "$report" 'Operation succeeded')"
+  operation_fail="$(ui_report_value "$report" 'Operation failed')"
+  completion_rate="$(ui_report_value "$report" 'Completion rate')"
+  total_time="$(ui_report_value "$report" 'Total time')"
+  throughput="$(ui_report_value "$report" 'Throughput')"
+  average_latency="$(ui_report_value "$report" 'Average latency')"
+  consistency="$(ui_report_value "$report" 'Consistency check')"
+  raw_output="$(ui_report_value "$report" 'Raw benchmark output')"
+  seat_map="$(ui_report_value "$report" 'Seat map snapshot')"
+  conflicts="$(ui_report_value "$report" 'Conflict evidence')"
+  server_log="$(ui_report_value "$report" 'Server log')"
+  summary="$(ui_report_value "$report" 'Machine-readable summary')"
+
+  ui_banner "AIRPLANE RESERVATION - LOAD TEST RESULT"
+  printf '\n%s%s[ RUN OVERVIEW ]%s\n' "$UI_BOLD" "$UI_BLUE" "$UI_RESET"
+  ui_rule '-'
+  printf '  %-14s : %-20.20s  %-14s : %s\n' \
+    'Experiment' "$experiment" 'Workers' "$workers"
+  printf '  %-14s : %-20.20s  %-14s : %s\n' \
+    'Operation' "$operation" 'Target seat' "$target"
+  printf '  %-14s : %-20.20s  %-14s : %s\n' \
+    'Total requests' "$(ui_group_integer "$total_requests")" \
+    'Concurrency' "$(ui_group_integer "$concurrency")"
+
+  printf '\n%s%s[ PERFORMANCE ]%s\n' "$UI_BOLD" "$UI_BLUE" "$UI_RESET"
+  ui_rule '-'
+  printf '  %s┌──────────────────────┬──────────────────────┬──────────────────────┐%s\n' "$UI_CYAN" "$UI_RESET"
+  printf '  %s│%s %-20s %s│%s %-20s %s│%s %-20s %s│%s\n' \
+    "$UI_CYAN" "$UI_RESET" 'THROUGHPUT' "$UI_CYAN" "$UI_RESET" \
+    'AVERAGE LATENCY' "$UI_CYAN" "$UI_RESET" 'TOTAL TIME' "$UI_CYAN" "$UI_RESET"
+  printf '  %s├──────────────────────┼──────────────────────┼──────────────────────┤%s\n' "$UI_CYAN" "$UI_RESET"
+  printf '  %s│%s %s%-20.20s%s %s│%s %s%-20.20s%s %s│%s %s%-20.20s%s %s│%s\n' \
+    "$UI_CYAN" "$UI_RESET" "$UI_BOLD$UI_GREEN" "$throughput" "$UI_RESET" \
+    "$UI_CYAN" "$UI_RESET" "$UI_BOLD$UI_MAGENTA" "$average_latency" "$UI_RESET" \
+    "$UI_CYAN" "$UI_RESET" "$UI_BOLD$UI_CYAN" "$total_time" "$UI_RESET" \
+    "$UI_CYAN" "$UI_RESET"
+  printf '  %s└──────────────────────┴──────────────────────┴──────────────────────┘%s\n' "$UI_CYAN" "$UI_RESET"
+
+  printf '\n%s%s[ REQUEST OUTCOME ]%s\n' "$UI_BOLD" "$UI_BLUE" "$UI_RESET"
+  ui_rule '-'
+  rate_number="${completion_rate%%%}"
+  rate_integer="${rate_number%%.*}"
+  [[ "$rate_integer" =~ ^[0-9]+$ ]] || rate_integer=0
+  [ "$rate_integer" -le 100 ] || rate_integer=100
+  filled=$((rate_integer * bar_width / 100))
+  empty=$((bar_width - filled))
+  printf -v filled_bar '%*s' "$filled" ''
+  printf -v empty_bar '%*s' "$empty" ''
+  filled_bar="${filled_bar// /█}"
+  empty_bar="${empty_bar// /░}"
+  printf '  Completion  %s%s%s%s%s  %s%s%s\n' \
+    "$UI_GREEN" "$filled_bar" "$UI_BLUE" "$empty_bar" "$UI_RESET" \
+    "$UI_BOLD" "$completion_rate" "$UI_RESET"
+  printf '  %-18s : %s%s / %s responses%s\n' 'Completed' \
+    "$UI_GREEN" "$(ui_group_integer "$completed")" "$(ui_group_integer "$total_requests")" "$UI_RESET"
+  if [ "$transport_fail" = 0 ]; then
+    printf '  %-18s : %s%s[PASS] 0 failures%s\n' 'Transport' "$UI_BOLD" "$UI_GREEN" "$UI_RESET"
+  else
+    printf '  %-18s : %s%s[FAIL] %s failures%s\n' 'Transport' \
+      "$UI_BOLD" "$UI_RED" "$(ui_group_integer "$transport_fail")" "$UI_RESET"
+  fi
+  printf '  %-18s : %s%s succeeded%s' 'Operation' \
+    "$UI_GREEN" "$(ui_group_integer "$operation_ok")" "$UI_RESET"
+  if [ "$operation_fail" = 0 ]; then
+    printf '    %s0 rejected/failed%s\n' "$UI_GREEN" "$UI_RESET"
+  else
+    printf '    %s%s rejected/failed%s\n' \
+      "$UI_YELLOW" "$(ui_group_integer "$operation_fail")" "$UI_RESET"
+  fi
+  case "$consistency" in
+    PASSED*) printf '  %-18s : %s%s[PASS] %s%s\n' 'Consistency' "$UI_BOLD" "$UI_GREEN" "$consistency" "$UI_RESET" ;;
+    *) printf '  %-18s : %s%s[FAIL] %s%s\n' 'Consistency' "$UI_BOLD" "$UI_RED" "$consistency" "$UI_RESET" ;;
+  esac
+
+  printf '\n%s%s[ SAVED ARTIFACTS ]%s\n' "$UI_BOLD" "$UI_BLUE" "$UI_RESET"
+  ui_rule '-'
+  printf '  %s•%s %-23s %s\n' "$UI_CYAN" "$UI_RESET" 'Raw benchmark' "$raw_output"
+  printf '  %s•%s %-23s %s\n' "$UI_CYAN" "$UI_RESET" 'Seat map' "$seat_map"
+  printf '  %s•%s %-23s %s\n' "$UI_CYAN" "$UI_RESET" 'Conflict evidence' "$conflicts"
+  printf '  %s•%s %-23s %s\n' "$UI_CYAN" "$UI_RESET" 'Server log' "$server_log"
+  printf '  %s•%s %-23s %s\n' "$UI_CYAN" "$UI_RESET" 'Machine summary' "$summary"
+  printf '\n  %sStarted at%s %s\n' "$UI_YELLOW" "$UI_RESET" "$started_at"
+}
+
 ui_render_seat_map() {
   local map_file="$1" conflict_file="${2:-}" line seat owner row column label color
   local label_length left_pad right_pad clients final_owner
@@ -207,12 +332,10 @@ ui_render_seat_map() {
     printf '    %s⚠ %d conflict%s' "$UI_RED" "$conflict_count" "$UI_RESET"
   fi
   printf '    Total 20\n'
-  printf '              %s[01]%s available    %s[10:C-1]%s reserved' \
-    "$UI_GREEN" "$UI_RESET" "$UI_RED" "$UI_RESET"
   if [ "$conflict_count" -gt 0 ]; then
-    printf '    %s[10:RACE]%s conflicting successes' "$UI_RED" "$UI_RESET"
+    printf '              %s⚠ RACE = multiple clients received SUCCESS%s\n' \
+      "$UI_RED" "$UI_RESET"
   fi
-  printf '\n'
   if [ "$conflict_count" -gt 0 ]; then
     printf '\n  %s%s[FAIL] CONSISTENCY CHECK%s\n' "$UI_BOLD" "$UI_RED" "$UI_RESET"
     printf '  Multiple clients received SUCCESS for the same seat.\n'
