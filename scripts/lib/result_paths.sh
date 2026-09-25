@@ -4,7 +4,10 @@ create_result_dir() {
   local category="$1"
   local kind="$2"
   local results_root="${RESULTS_DIR:-$ROOT_DIR/results}"
-  local parent="$results_root/$category/$kind"
+  local parent="$results_root/$category"
+  if [ -n "$kind" ]; then
+    parent="$parent/$kind"
+  fi
   local stamp run_dir suffix
 
   mkdir -p "$parent"

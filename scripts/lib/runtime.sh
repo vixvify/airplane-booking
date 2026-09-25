@@ -1,30 +1,35 @@
 #!/usr/bin/env bash
-# Shared transport for demos. The Compose stack must already be running.
-compose() {
-  bash "$ROOT_DIR/scripts/compose.sh" "$@"
+# Shared transport for demos. The server container must already be running.
+container() {
+  bash "$ROOT_DIR/scripts/container.sh" "$@"
 }
 
 init_runtime() {
-  RUNTIME="${RUNTIME:-compose}"
+  RUNTIME="${RUNTIME:-container}"
   case "$RUNTIME" in
-    compose)
-      local services
-      services="$(compose ps --status running --services)"
-      if ! grep -qx server <<<"$services"; then
-        echo "Compose server is not running. Start the stack with: bash scripts/compose.sh up -d --build" >&2
+    container)
+      if [ "$(container status 2>/dev/null || true)" != true ]; then
+        echo "Server container is not running. Run: bash scripts/container.sh build && bash scripts/container.sh start <experiment>" >&2
         return 1
       fi
+      EXPERIMENT="$(container mode)"
+      WORKER_COUNT="$(container workers)"
+      case "$EXPERIMENT" in
+        sequential|nosync|sync) ;;
+        *) echo "Unrecognized running experiment: $EXPERIMENT" >&2; return 1 ;;
+      esac
       ;;
     local) : "${SERVER_LOG:?Set SERVER_LOG to the running server log file}"
            [ -r "$SERVER_LOG" ] || { echo "Cannot read SERVER_LOG" >&2; return 1; } ;;
-    *) echo "Unknown RUNTIME: $RUNTIME (use compose or local)" >&2; return 1 ;;
+    *) echo "Unknown RUNTIME: $RUNTIME (use container or local)" >&2; return 1 ;;
   esac
+  EXPERIMENT="${EXPERIMENT:-${AIRPLANE_EXPERIMENT:-local}}"
 }
 
 runtime_client() {
   local id="$1"
   case "$RUNTIME" in
-    compose) compose exec -i "client-$id" ./client "$id" ;;
+    container) container exec -i ./client "$id" ;;
     local) "$ROOT_DIR/client" "$id" ;;
   esac
 }
@@ -32,14 +37,14 @@ runtime_client() {
 # exec makes the background PID the actual log process, so cleanup stops it.
 runtime_live_logs() {
   case "$RUNTIME" in
-    compose) exec bash "$ROOT_DIR/scripts/compose.sh" logs -f --since "$STARTED_AT" --timestamps server ;;
+    container) exec bash "$ROOT_DIR/scripts/container.sh" logs -f --since "$STARTED_AT" --timestamps ;;
     local) exec tail -s 0.05 -c "+$LOCAL_LOG_START" -f "$SERVER_LOG" ;;
   esac
 }
 
 runtime_log_snapshot() {
   case "$RUNTIME" in
-    compose) compose logs --since "$STARTED_AT" --timestamps server ;;
+    container) container logs --since "$STARTED_AT" --timestamps ;;
     local) tail -c "+$LOCAL_LOG_START" "$SERVER_LOG" ;;
   esac
 }

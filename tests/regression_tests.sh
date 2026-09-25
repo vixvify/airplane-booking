@@ -55,8 +55,12 @@ pass "request IDs isolate concurrent sessions with the same client ID"
 
 start_server sync 3
 demo_output="$(RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$RESULTS_DIR" bash "$ROOT_DIR/scripts/demo1.sh")"
-assert_contains "$demo_output" "Successful reservations: 5/5" "Demo 1 report should identify all reserved seats"
+assert_contains "$demo_output" "Successful seat reservations: 10/10" "Demo 1 report should identify all reserved seats"
 assert_contains "$demo_output" "Successful cancellations: 5/5" "Demo 1 report should identify all cancellations"
+assert_contains "$demo_output" "Seats remaining reserved: 5/5" "Demo 1 should leave one reserved seat per client"
+for expected in '[02:C-1]' '[03:C-2]' '[06:C-3]' '[07:C-4]' '[10:C-5]'; do
+  assert_contains "$demo_output" "$expected" "Demo 1 final seat map should contain $expected"
+done
 pass "Demo 1 runs five mixed-command clients and validates results"
 start_server sync 1
 concurrent_output="$(RUNTIME=local SERVER_LOG="$SERVER_LOG" RESULTS_DIR="$RESULTS_DIR" bash "$ROOT_DIR/scripts/concurrent-test.sh")"

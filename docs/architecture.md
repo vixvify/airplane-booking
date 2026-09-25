@@ -1,6 +1,6 @@
 # System Architecture
 
-ระบบจองที่นั่งนี้รันบน Linux ภายใน Docker Compose โดยมี client containers 5 ตัวและ server container 1 ตัว Client กับ server คุยกันผ่าน **System V message queues สองชุด** ส่วน worker threads และสถานะที่นั่งอยู่ภายใน server process เดียวกัน
+ระบบจองที่นั่งนี้รันบน Linux ภายใน **Docker container เดียว** โดยมี server process และ client processes อย่างน้อย 5 ตัวที่เปิดเพิ่มด้วย `docker exec`. Client กับ server คุยกันผ่าน **System V message queues สองชุด** ส่วน worker threads และสถานะที่นั่งอยู่ภายใน server process เดียวกัน
 
 ## ภาพรวม
 
@@ -12,20 +12,20 @@
 
 | ส่วนในภาพ | สิ่งที่ใช้จริง | หน้าที่ |
 | --- | --- | --- |
-| Host scripts | `scripts/`, `tests/` และ Docker Compose | เริ่ม/หยุด services, เปิด client, รัน demo/load test และเก็บผลลง `results/` บน host |
-| Client 1–5 | Compose services `client-1` ถึง `client-5` | แต่ละ container รอด้วย `sleep infinity`; เมื่อสั่ง `docker compose exec` จึงเริ่ม `./client <client_id>` หรือ `./load_test` ภายใน container |
+| Host scripts | `scripts/`, `tests/` และ Docker CLI | Build image, เริ่ม/หยุด container, เปิด client, รัน demo/load test และเก็บผลลง `results/` บน host |
+| Client 1–5 | `./client <client_id>` processes | เปิดผ่าน `docker exec` ภายใน container เดียวกับ server; สามารถเปิด client เพิ่มโดยไม่ต้องสร้าง container ใหม่ |
 | Request queue | System V `msgget`/`msgsnd`/`msgrcv` | รับคำสั่งจากทุก client ร่วมกัน; request ทุกอันใช้ `mtype = 1` |
 | Response queue | System V message queue อีกชุด | รับคำตอบจาก workers; `mtype = requestId` เพื่อให้แต่ละคำขออ่านผลของตนเองได้ ไม่ต้องมี private queue |
-| Server process | `./server <sync|nosync> <worker_count>` | กัน server ซ้ำด้วย `flock`, สร้าง queues, เปิด worker threads, ถือ seat state และลบ queues เมื่อปิดตามปกติ |
+| Server process | `./server <sync|nosync> <worker_count>` | เป็น process หลักของ container; กัน server ซ้ำด้วย `flock`, สร้าง queues, เปิด worker threads, ถือ seat state และลบ queues เมื่อปิดตามปกติ |
 | Worker 1–3 | C++ `std::thread` ภายใน server process | แย่งกันรับ request จากคิวเดียว, parse/validate คำสั่ง, เรียก reservation logic และส่ง response |
 | Seat state | `int seats[20]` ใน memory ของ server | `0` หมายถึงว่าง; ค่า `clientId` ที่เป็นบวกหมายถึง client นั้นจองไว้; รีเซ็ตเมื่อเริ่ม server ใหม่ |
 | Seat locks | `std::mutex seatMutexes[20]` | ล็อกแยกตามที่นั่งในโหมด `sync`; โหมด `nosync` ตั้งใจไม่ใช้เพื่อสาธิต race condition |
 
-## Container และ IPC ใช้ร่วมกันอย่างไร
+## ทำไมใช้ container เดียวแล้วคุยกันได้
 
-`compose/compose.yaml` ให้ server ใช้ `ipc: shareable` และ clients ใช้ `ipc: service:server` จึงมองเห็น System V queues ชุดเดียวกัน ทุก container ยัง mount named volume เดียวกันที่ `/ipc` เพื่อให้ `ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` ได้ key สำหรับ request/response queue ตามลำดับ
+`scripts/container.sh` ใช้ Dockerfile build image แล้วเปิด container โดยให้ `./server` เป็น process หลัก เมื่อใช้ `docker exec` เปิด `./client` เพิ่ม ทุก process อยู่ใน container เดียวกัน จึงเห็น IPC namespace และ path `/ipc` เดียวกันโดยอัตโนมัติ ไม่ต้องตั้งค่า `ipc: host` หรือ mount shared volume
 
-**Queue messages ไม่ได้ถูกเก็บใน volume**: ตัว queue อยู่ใน kernel ของ IPC namespace ส่วน `/ipc` เป็นเพียง path อ้างอิงเพื่อสร้าง key และมีไฟล์ `/ipc/server.lock` สำหรับ `flock` ป้องกันการเปิด server ซ้ำ ระบบนี้ไม่ได้ใช้ System V semaphore; ตัวป้องกัน race ของที่นั่งคือ C++ `std::mutex` ใน server process
+`ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` ใช้ path เดียวกันแต่คนละ project ID เพื่อสร้าง key ของ request/response queue. **Queue messages ไม่ได้ถูกเก็บเป็นไฟล์ใต้ `/ipc`**: ตัว queue อยู่ใน kernel ส่วน directory `/ipc` สร้างไว้ใน Dockerfile เพื่อให้ `ftok` ใช้อ้างอิง และมีไฟล์ `/ipc/server.lock` สำหรับ `flock` ป้องกันการเปิด server ซ้ำ ระบบนี้ไม่ได้ใช้ System V semaphore; ตัวป้องกัน race ของที่นั่งคือ C++ `std::mutex`
 
 ## เส้นทางของหนึ่งคำสั่ง
 
@@ -63,21 +63,21 @@
 
 ## โหมดทดลอง
 
-Compose overlay เปลี่ยนคำสั่งเริ่ม server โดยไม่เปลี่ยน topology ของ client และ queues:
+สคริปต์เริ่ม container ด้วย server command ต่างกัน โดย client และ queues ยังมี topology เดิม:
 
-| Experiment | Compose configuration | Server command | จุดที่สังเกต |
+| Experiment | คำสั่ง | Server command | จุดที่สังเกต |
 | --- | --- | --- | --- |
-| 1: Sequential baseline | `compose/compose.sequential.yaml` | `./server sync 1` | มี worker เดียว จึงประมวลผลทีละ request |
-| 2: Concurrent nosync | `compose/compose.yaml` | `./server nosync 3` | มีสาม worker และตั้งใจไม่ล็อกเพื่อแสดง race |
-| 3: Concurrent sync | `compose/compose.sync.yaml` | `./server sync 3` | มีสาม worker พร้อม per-seat mutex |
+| 1: Sequential baseline | `bash scripts/container.sh start sequential` | `./server sync 1` | มี worker เดียว จึงประมวลผลทีละ request |
+| 2: Concurrent nosync | `bash scripts/container.sh start nosync` | `./server nosync 3` | มีสาม worker และตั้งใจไม่ล็อกเพื่อแสดง race |
+| 3: Concurrent sync | `bash scripts/container.sh start sync` | `./server sync 3` | มีสาม worker พร้อม per-seat mutex |
 
-`scripts/compose.sh` เลือก overlay จาก `COMPOSE_EXPERIMENT` (ค่าเริ่มต้น `nosync`). เมื่อต้องการเปลี่ยน experiment ให้หยุดแล้วเริ่ม Compose ใหม่ เพื่อให้ server และสถานะใน memory เป็นชุดใหม่ ดูคำสั่งรันจริงใน [README](../README.md)
+`scripts/container.sh` ใช้ `nosync` เป็นค่าเริ่มต้น เมื่อต้องการเปลี่ยน experiment ให้ `stop` แล้ว `start` ใหม่เพื่อให้ server และสถานะใน memory เป็นชุดใหม่ ดูคำสั่งรันจริงใน [README](../README.md)
 
 ## Logs, load test และหลักฐาน
 
 Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` จึงตามลำดับการรับคำสั่ง, การรอ/ได้ lock และการเข้า/ออก critical section ได้ `AIRPLANE_LOG_MODE=quiet` ลด log ระดับ worker สำหรับ benchmark แต่ไม่เปลี่ยน message flow หรือ reservation logic
 
-`./load_test` เรียก exchange เดียวกับ client แต่สร้างหลาย threads ตามค่า concurrency และสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
+`./load_test` เรียก exchange เดียวกับ client และสร้างหนึ่ง thread ต่อหนึ่ง logical client ตามค่า concurrency แต่ละ thread ใช้ client ID เดิมตลอดรอบและส่งคำขอทีละรายการ โดยแบ่ง request numbers ให้แต่ละ thread อย่างแน่นอนเพื่อให้จองและยกเลิกด้วย owner เดิมได้ โปรแกรมสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เรียก `docker exec` และเก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
 
 ## แผนที่โค้ด
 
@@ -89,5 +89,5 @@ Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` 
 | `src/reservation/` | seat state, validation, reserve/cancel และ mutex |
 | `src/load_test/` | concurrent load generator และตัวเลขผลการทดสอบ |
 | `src/utils/` | parser, logger และ random delay |
-| `compose/` | services และ overlays ของสาม experiment |
+| `Dockerfile`, `scripts/container.sh` | image และการเริ่ม/หยุด server container เดียว |
 | `scripts/`, `tests/` | คำสั่ง demo/เก็บผล และชุดทดสอบ |

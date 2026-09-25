@@ -8,6 +8,6 @@ COPY scripts ./scripts
 COPY tests ./tests
 
 RUN make
-RUN mkdir -p /ipc
+RUN mkdir -p /ipc /app/results
 
-CMD ["sleep", "infinity"]
+CMD ["./server", "nosync", "3"]

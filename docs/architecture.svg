@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 1120" role="img" aria-labelledby="title description">
   <title id="title">Airplane reservation system architecture</title>
-  <desc id="description">Five Docker Compose clients use separate shared System V request and response queues to communicate with one server process. One or three worker threads process commands against 20 in-memory seats, using per-seat C++ mutexes in sync mode. Scripts run on the host and save results.</desc>
+  <desc id="description">One Docker container runs a server process plus five or more client processes launched through docker exec. Client processes communicate with server worker threads through separate System V request and response queues. Workers share 20 in-memory seats and per-seat C++ mutexes in sync mode.</desc>
   <defs>
     <marker id="request-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#74b7ff"/></marker>
     <marker id="response-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#62ddbd"/></marker>
@@ -24,7 +24,7 @@
 
   <rect width="1800" height="1120" fill="#0c1422"/>
   <text x="80" y="58" class="title">Airplane Reservation — architecture</text>
-  <text x="80" y="88" class="subtitle">Docker Compose · two shared System V message queues · one server process with 1 or 3 worker threads</text>
+  <text x="80" y="88" class="subtitle">One Docker container · two System V message queues · server + client processes in one IPC namespace</text>
 
   <rect x="80" y="120" width="1640" height="130" rx="18" fill="#18263a" stroke="#506581" stroke-width="2"/>
   <text x="110" y="155" class="group">HOST · COMMANDS AND EVIDENCE</text>
@@ -32,17 +32,17 @@
   <text x="338" y="209" text-anchor="middle" class="name">Demo / test / load-test scripts</text>
   <path d="M 560 202 H 655" class="control"/>
   <rect x="655" y="175" width="370" height="55" rx="9" fill="#284565" stroke="#81b7f4" stroke-width="2"/>
-  <text x="840" y="209" text-anchor="middle" class="name">Docker Compose exec / up</text>
+  <text x="840" y="209" text-anchor="middle" class="name">Docker build / run / exec</text>
   <path d="M 1025 202 H 1120" class="control"/>
   <rect x="1120" y="175" width="565" height="55" rx="9" fill="#284565" stroke="#81b7f4" stroke-width="2"/>
   <text x="1402" y="209" text-anchor="middle" class="name">TXT results + server logs on host</text>
 
   <rect x="80" y="285" width="1640" height="575" rx="18" fill="#172235" stroke="#506581" stroke-width="2"/>
-  <text x="110" y="321" class="group">DOCKER COMPOSE PROJECT · SHARED IPC NAMESPACE</text>
+  <text x="110" y="321" class="group">ONE DOCKER CONTAINER · ALL PROCESSES SHARE THE SAME IPC NAMESPACE</text>
   <path d="M 840 230 V 285" class="control"/>
 
   <rect x="110" y="355" width="305" height="450" rx="16" fill="#193428" stroke="#69c392" stroke-width="2"/>
-  <text x="135" y="387" class="group">CLIENT CONTAINERS</text>
+  <text x="135" y="387" class="group">CLIENT PROCESSES</text>
   <g fill="#254b39" stroke="#77d4a4" stroke-width="2">
     <rect x="135" y="410" width="255" height="52" rx="8"/>
     <rect x="135" y="470" width="255" height="52" rx="8"/>
@@ -56,7 +56,7 @@
   <text x="262" y="624" text-anchor="middle" class="name">Client 4</text>
   <text x="262" y="684" text-anchor="middle" class="name">Client 5</text>
   <text x="135" y="743" class="detail">./client or ./load_test via exec</text>
-  <text x="135" y="773" class="small">Containers idle with sleep infinity</text>
+  <text x="135" y="773" class="small">5 shown; more via docker exec</text>
 
   <rect x="525" y="385" width="265" height="130" rx="13" fill="#48341e" stroke="#e8ad56" stroke-width="2"/>
   <text x="657" y="425" text-anchor="middle" class="name">Request queue</text>
@@ -69,7 +69,7 @@
   <text x="657" y="740" text-anchor="middle" class="small">ftok(/ipc, 'B')</text>
 
   <rect x="925" y="355" width="760" height="450" rx="16" fill="#2a233c" stroke="#ad92df" stroke-width="2"/>
-  <text x="950" y="387" class="group">SERVER CONTAINER · ONE PROCESS</text>
+  <text x="950" y="387" class="group">SERVER PROCESS · SAME CONTAINER</text>
   <rect x="955" y="410" width="700" height="76" rx="10" fill="#3b3051" stroke="#bea6e8" stroke-width="2"/>
   <text x="1305" y="440" text-anchor="middle" class="name">Server process</text>
   <text x="1305" y="467" text-anchor="middle" class="detail">Creates queues · starts threads · owns seat state · flock singleton</text>
