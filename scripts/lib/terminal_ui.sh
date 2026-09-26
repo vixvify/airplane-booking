@@ -3,22 +3,26 @@
 UI_WIDTH=76
 UI_RESET=""
 UI_BOLD=""
+UI_DIM=""
 UI_CYAN=""
 UI_BLUE=""
 UI_GREEN=""
 UI_RED=""
 UI_YELLOW=""
 UI_MAGENTA=""
+UI_WHITE=""
 
 if { [ -t 1 ] || [ "${FORCE_COLOR:-0}" = 1 ]; } && [ -z "${NO_COLOR:-}" ]; then
   UI_RESET=$'\033[0m'
   UI_BOLD=$'\033[1m'
+  UI_DIM=$'\033[2m'
   UI_CYAN=$'\033[36m'
   UI_BLUE=$'\033[34m'
   UI_GREEN=$'\033[32m'
   UI_RED=$'\033[31m'
   UI_YELLOW=$'\033[33m'
   UI_MAGENTA=$'\033[35m'
+  UI_WHITE=$'\033[37m'
 fi
 
 ui_rule() {
@@ -56,68 +60,224 @@ ui_stream() {
     "$source_color" "$source" "$UI_RESET" "$message_color" "$message" "$UI_RESET"
 }
 
-ui_render_report() {
-  local report="$1" line section="" label value
+ui_trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
 
-  # Keep redirected output stable for scripts and CI. The richer renderer is
+ui_result_detail() {
+  local value="$1"
+  value="${value#SUCCESS (}"
+  value="${value#FAILED: }"
+  value="${value#FAILED (}"
+  value="${value%)}"
+  value="${value#Transaction cancelled because }"
+  printf '%s' "$value"
+}
+
+ui_render_report() {
+  local report="$1" title experiment workers clients command target started consistency
+  local success failed reserved cancelled kept run_dir line in_clients=false
+  local raw_client raw_first raw_second raw_third client first second third status detail marker color
+  local command_display run_label consistency_status consistency_color outcome_label outcome_color
+  local command_names workload
+  local run_accent="$UI_CYAN" summary_accent="$UI_MAGENTA"
+  local clients_accent="$UI_WHITE" evidence_accent="$UI_DIM"
+
+  # Keep redirected output stable for scripts and CI. The compact dashboard is
   # only used when a person is looking at an interactive terminal.
   if [ ! -t 1 ] && [ "${FORCE_COLOR:-0}" != 1 ]; then
     cat "$report"
     return
   fi
 
+  title="$(sed -n '/^AIRPLANE RESERVATION - .* RESULT$/ {p;q;}' "$report")"
+  title="${title:-AIRPLANE RESERVATION - RESULT}"
+  experiment="$(ui_report_value "$report" 'Experiment')"
+  workers="$(ui_report_value "$report" 'Workers')"
+  clients="$(ui_report_value "$report" 'Clients')"
+  command="$(ui_report_value "$report" 'Command')"
+  target="$(ui_report_value "$report" 'Target seat')"
+  started="$(ui_report_value "$report" 'Started at')"
+  consistency="$(ui_report_value "$report" 'Consistency check')"
+  run_dir="$(dirname "$report")"
+  consistency_status='FAILED'
+  consistency_color="$UI_RED"
+  if [[ "$consistency" == PASSED* ]]; then
+    consistency_status='PASSED'
+    consistency_color="$UI_GREEN"
+  fi
+
+  ui_banner "$title"
+  printf '\n%s%s[ RUN OVERVIEW ]%s\n' "$UI_BOLD" "$run_accent" "$UI_RESET"
+  printf '  %s┌───────────────────────────────────┬───────────────────────────────────┐%s\n' "$run_accent" "$UI_RESET"
+  printf '  %s│%s %-11s : %-19.19s %s│%s %-11s : %-19.19s %s│%s\n' \
+    "$run_accent" "$UI_RESET" 'Experiment' "$experiment" \
+    "$run_accent" "$UI_RESET" 'Workers' "$workers" "$run_accent" "$UI_RESET"
+  if [[ "$title" == *'DEMO 1'* ]]; then
+    run_label='Scenario'
+    command_display='Mixed seat commands'
+  else
+    run_label='Command'
+    command_display="$command"
+    if [ "$target" != 'not applicable' ] && [ "$target" != 'not available' ]; then
+      command_display="$command / Seat $target"
+    fi
+  fi
+  printf '  %s├───────────────────────────────────┼───────────────────────────────────┤%s\n' "$run_accent" "$UI_RESET"
+  printf '  %s│%s %-11s : %-19.19s %s│%s %-11s : %-19.19s %s│%s\n' \
+    "$run_accent" "$UI_RESET" "$run_label" "$command_display" \
+    "$run_accent" "$UI_RESET" 'Clients' "$clients" "$run_accent" "$UI_RESET"
+  printf '  %s└───────────────────────────────────┴───────────────────────────────────┘%s\n' "$run_accent" "$UI_RESET"
+  if [[ "$title" == *'DEMO 1'* ]]; then
+    command_names="$(ui_report_value "$report" 'Commands')"
+    workload="$(ui_report_value "$report" 'Workload')"
+    printf '  %sCommands:%s %s\n' "$run_accent" "$UI_RESET" "$command_names"
+    printf '  %sWorkload:%s %s\n' "$run_accent" "$UI_RESET" "$workload"
+  fi
+  printf '  %sStarted: %s%s\n' "$UI_DIM" "$started" "$UI_RESET"
+
+  printf '\n%s%s[ RESULT SUMMARY ]%s\n' "$UI_BOLD" "$summary_accent" "$UI_RESET"
+  if [[ "$title" == *'DEMO 1'* ]]; then
+    reserved="$(ui_report_value "$report" 'Successful seat reservations')"
+    failed="$(ui_report_value "$report" 'Failed seat reservations')"
+    cancelled="$(ui_report_value "$report" 'Successful cancellations')"
+    kept="$(ui_report_value "$report" 'Seats remaining reserved')"
+    printf '  %s┌────────────────┬────────────────┬────────────────┬────────────────┐%s\n' "$summary_accent" "$UI_RESET"
+    printf '  %s│%s %s%-14s%s %s│%s %s%-14s%s %s│%s %s%-14s%s %s│%s %s%-14s%s %s│%s\n' \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD$UI_GREEN" 'RESERVED' "$UI_RESET" \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD$UI_CYAN" 'CANCELLED' "$UI_RESET" \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD$UI_MAGENTA" 'KEPT' "$UI_RESET" \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD" 'CONSISTENCY' "$UI_RESET" "$summary_accent" "$UI_RESET"
+    printf '  %s├────────────────┼────────────────┼────────────────┼────────────────┤%s\n' "$summary_accent" "$UI_RESET"
+    printf '  %s│%s %-14.14s %s│%s %-14.14s %s│%s %-14.14s %s│%s %s%-14.14s%s %s│%s\n' \
+      "$summary_accent" "$UI_RESET" "$reserved" "$summary_accent" "$UI_RESET" "$cancelled" \
+      "$summary_accent" "$UI_RESET" "$kept" "$summary_accent" "$UI_RESET" \
+      "$consistency_color" "$consistency_status" "$UI_RESET" "$summary_accent" "$UI_RESET"
+    printf '  %s└────────────────┴────────────────┴────────────────┴────────────────┘%s\n' "$summary_accent" "$UI_RESET"
+    if [[ ! "$failed" =~ ^0/ ]]; then
+      printf '  %s%s[FAIL] %s reservation attempts failed%s\n' \
+        "$UI_BOLD" "$UI_RED" "$failed" "$UI_RESET"
+    fi
+  else
+    case "$command" in
+      RESERVE)
+        success="$(ui_report_value "$report" 'Successful reservations')"
+        failed="$(ui_report_value "$report" 'Failed reservations')"
+        outcome_label='REJECTED'
+        outcome_color="$UI_YELLOW"
+        ;;
+      CANCEL)
+        success="$(ui_report_value "$report" 'Successful cancellations')"
+        failed="$(ui_report_value "$report" 'Failed cancellations')"
+        outcome_label='REJECTED'
+        outcome_color="$UI_YELLOW"
+        ;;
+      *)
+        success="$(ui_report_value "$report" 'Successful commands')"
+        failed="$(ui_report_value "$report" 'Failed commands')"
+        outcome_label='ERRORS'
+        outcome_color="$UI_RED"
+        ;;
+    esac
+    printf '  %s┌──────────────────────┬──────────────────────┬──────────────────────┐%s\n' "$summary_accent" "$UI_RESET"
+    printf '  %s│%s %s%-20s%s %s│%s %s%-20s%s %s│%s %s%-20s%s %s│%s\n' \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD$UI_GREEN" 'SUCCESS' "$UI_RESET" \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD$outcome_color" "$outcome_label" "$UI_RESET" \
+      "$summary_accent" "$UI_RESET" "$UI_BOLD" 'CONSISTENCY' "$UI_RESET" "$summary_accent" "$UI_RESET"
+    printf '  %s├──────────────────────┼──────────────────────┼──────────────────────┤%s\n' "$summary_accent" "$UI_RESET"
+    printf '  %s│%s %-20.20s %s│%s %-20.20s %s│%s %s%-20.20s%s %s│%s\n' \
+      "$summary_accent" "$UI_RESET" "$success" "$summary_accent" "$UI_RESET" "$failed" \
+      "$summary_accent" "$UI_RESET" "$consistency_color" "$consistency_status" "$UI_RESET" \
+      "$summary_accent" "$UI_RESET"
+    printf '  %s└──────────────────────┴──────────────────────┴──────────────────────┘%s\n' "$summary_accent" "$UI_RESET"
+  fi
+  if [[ "$consistency" != PASSED* ]]; then
+    printf '  %s%s[FAIL]%s %s\n' "$UI_BOLD" "$UI_RED" "$UI_RESET" "$consistency"
+  fi
+
+  printf '\n%s%s[ CLIENT RESULTS ]%s\n' "$UI_BOLD" "$clients_accent" "$UI_RESET"
+  if [[ "$title" == *'DEMO 1'* ]]; then
+    printf '  %s┌────────────┬──────────┬──────────────────┬──────────────┬────────────┐%s\n' "$clients_accent" "$UI_RESET"
+    printf '  %s│%s %-10s %s│%s %-8s %s│%s %-16s %s│%s %-12s %s│%s %-10s %s│%s\n' \
+      "$clients_accent" "$UI_RESET" 'CLIENT' "$clients_accent" "$UI_RESET" 'STATUS' \
+      "$clients_accent" "$UI_RESET" 'RESERVED' "$clients_accent" "$UI_RESET" 'CANCELLED' \
+      "$clients_accent" "$UI_RESET" 'KEPT' "$clients_accent" "$UI_RESET"
+    printf '  %s├────────────┼──────────┼──────────────────┼──────────────┼────────────┤%s\n' "$clients_accent" "$UI_RESET"
+  else
+    printf '  %s┌────────────┬──────────┬──────────────────────────────────────────────┐%s\n' "$clients_accent" "$UI_RESET"
+    printf '  %s│%s %-10s %s│%s %-8s %s│%s %-44s %s│%s\n' \
+      "$clients_accent" "$UI_RESET" 'CLIENT' "$clients_accent" "$UI_RESET" 'STATUS' \
+      "$clients_accent" "$UI_RESET" 'DETAIL' "$clients_accent" "$UI_RESET"
+    printf '  %s├────────────┼──────────┼──────────────────────────────────────────────┤%s\n' "$clients_accent" "$UI_RESET"
+  fi
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      AIRPLANE\ RESERVATION\ -*RESULT)
-        ui_banner "$line"
-        ;;
-      CONFIGURATION|"CLIENT RESULTS"|RESULTS|SUMMARY|ARTIFACTS)
-        section="$line"
-        printf '\n%s%s[ %s ]%s\n' "$UI_BOLD" "$UI_BLUE" "$line" "$UI_RESET"
-        ui_rule '-'
-        ;;
-      ===*|---*)
-        ;;
-      Client*'|'*)
-        printf '%s%s  %s%s\n' "$UI_BOLD" "$UI_CYAN" "$line" "$UI_RESET"
-        ;;
-      client-*'|'*SUCCESS*)
-        printf '%s  %s%s%s\n' "$UI_GREEN" "$line" "$UI_RESET"
-        ;;
-      client-*'|'*FAILED*)
-        printf '%s  %s%s%s\n' "$UI_RED" "$line" "$UI_RESET"
-        ;;
-      Successful*|Completed:*|"Operation succeeded:"*|"Completion rate:"*)
-        printf '  %s%s[PASS] %s%s\n' "$UI_BOLD" "$UI_GREEN" "$line" "$UI_RESET"
-        ;;
-      "Consistency check: PASSED"*)
-        printf '  %s%s[PASS] %s%s\n' "$UI_BOLD" "$UI_GREEN" "$line" "$UI_RESET"
-        ;;
-      "Consistency check: FAILED"*)
-        printf '  %s%s[FAIL] %s%s\n' "$UI_BOLD" "$UI_RED" "$line" "$UI_RESET"
-        ;;
-      Failed:*|"Failed "*|"Transport failures:"*|"Operation failed:"*)
-        value="${line#*:}"
-        value="${value# }"
-        if [[ "$value" =~ ^0($|/) ]]; then
-          printf '  %s%s[ OK ] %s%s\n' "$UI_BOLD" "$UI_GREEN" "$line" "$UI_RESET"
-        else
-          printf '  %s%s[FAIL] %s%s\n' "$UI_BOLD" "$UI_RED" "$line" "$UI_RESET"
-        fi
-        ;;
-      Throughput:*|"Average latency:"*|"Total time:"*)
-        printf '  %s%s%s%s\n' "$UI_BOLD" "$UI_CYAN" "$line" "$UI_RESET"
-        ;;
-      *:*)
-        label="${line%%:*}"
-        value="${line#*:}"
-        value="${value# }"
-        ui_kv "$label" "$value"
-        ;;
-      '') printf '\n' ;;
-      *) printf '  %s\n' "$line" ;;
+      'CLIENT RESULTS') in_clients=true; continue ;;
+      SUMMARY) break ;;
     esac
+    [ "$in_clients" = true ] || continue
+    case "$line" in
+      ''|---*|Client*'|'*) continue ;;
+    esac
+    [[ "$line" == *'|'* ]] || continue
+
+    IFS='|' read -r raw_client raw_first raw_second raw_third <<<"$line"
+    client="$(ui_trim "$raw_client")"
+    client="${client/client-/Client-}"
+    first="$(ui_trim "$raw_first")"
+    second="$(ui_trim "$raw_second")"
+    third="$(ui_trim "$raw_third")"
+
+    if [[ "$title" == *'DEMO 1'* ]]; then
+      if [[ "$first" == SUCCESS* && "$second" == SUCCESS* && "$third" == SUCCESS* ]]; then
+        marker='PASS'
+        color="$UI_GREEN"
+      else
+        marker='FAIL'
+        color="$UI_RED"
+      fi
+      first="$(ui_result_detail "$first")"
+      first="${first#Seats }"
+      first="${first#Seat }"
+      second="$(ui_result_detail "$second")"
+      second="${second#Seat }"
+      third="$(ui_result_detail "$third")"
+      third="${third#Seat }"
+      printf '  %s│%s %-10.10s %s│%s %s%-8.8s%s %s│%s %-16.16s %s│%s %-12.12s %s│%s %-10.10s %s│%s\n' \
+        "$clients_accent" "$UI_RESET" "$client" "$clients_accent" "$UI_RESET" \
+        "$color" "$marker" "$UI_RESET" "$clients_accent" "$UI_RESET" "$first" \
+        "$clients_accent" "$UI_RESET" "$second" "$clients_accent" "$UI_RESET" "$third" \
+        "$clients_accent" "$UI_RESET"
+    else
+      status="$first"
+      detail="$(ui_result_detail "$status")"
+      if [[ "$status" == SUCCESS* ]]; then
+        marker='PASS'
+        color="$UI_GREEN"
+      elif [[ "$detail" == *'already reserved'* || "$detail" == *'is not reserved'* || "$detail" == *'belongs to another client'* ]]; then
+        marker='REJECTED'
+        color="$UI_YELLOW"
+      else
+        marker='ERROR'
+        color="$UI_RED"
+      fi
+      printf '  %s│%s %-10.10s %s│%s %s%-8.8s%s %s│%s %-44.44s %s│%s\n' \
+        "$clients_accent" "$UI_RESET" "$client" "$clients_accent" "$UI_RESET" \
+        "$color" "$marker" "$UI_RESET" "$clients_accent" "$UI_RESET" "$detail" \
+        "$clients_accent" "$UI_RESET"
+    fi
   done <"$report"
+  if [[ "$title" == *'DEMO 1'* ]]; then
+    printf '  %s└────────────┴──────────┴──────────────────┴──────────────┴────────────┘%s\n' "$clients_accent" "$UI_RESET"
+  else
+    printf '  %s└────────────┴──────────┴──────────────────────────────────────────────┘%s\n' "$clients_accent" "$UI_RESET"
+  fi
+
+  printf '\n%s[ SAVED EVIDENCE ]%s\n' "$evidence_accent" "$UI_RESET"
+  printf '  %sFolder  %s%s\n' "$evidence_accent" "$run_dir" "$UI_RESET"
 }
 
 ui_report_value() {
@@ -307,7 +467,7 @@ ui_render_seat_map() {
           ;;
         reserved)
           printf -v label '[%02d:C-%s]' "$seat" "${seat_owner[seat]}"
-          color="$UI_RED"
+          color="$UI_MAGENTA"
           reserved_count=$((reserved_count + 1))
           ;;
         *)
@@ -327,7 +487,7 @@ ui_render_seat_map() {
   printf '                       %s%s▼ TAIL%s\n\n' "$UI_BOLD" "$UI_CYAN" "$UI_RESET"
   printf '              %s● %d available%s    %s● %d reserved%s' \
     "$UI_GREEN" "$available_count" "$UI_RESET" \
-    "$UI_RED" "$reserved_count" "$UI_RESET"
+    "$UI_MAGENTA" "$reserved_count" "$UI_RESET"
   if [ "$conflict_count" -gt 0 ]; then
     printf '    %s⚠ %d conflict%s' "$UI_RED" "$conflict_count" "$UI_RESET"
   fi

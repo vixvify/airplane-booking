@@ -44,9 +44,18 @@ if [ "$DEMO_NAME" = demo1 ]; then
   CLIENT_COUNT=5
   COMMAND=mixed
   SEAT_ID=various
+  DEMO_COMMAND_NAMES='LIST, STATUS, RESERVE, CANCEL, QUIT'
+  DEMO_WORKLOAD='Reserve 2 seats, cancel 1 seat, keep 1 reserved per client'
   DEMO_RESERVE_SEATS=("1 2" "3 4" "5 6" "7 8" "9 10")
   DEMO_CANCEL_SEATS=(1 4 5 8 9)
   DEMO_REMAINING_SEATS=(2 3 6 7 10)
+  DEMO_COMMANDS=(
+    $'LIST\nRESERVE 1 2\nSTATUS 1\nCANCEL 1\nSTATUS 2\nQUIT\n'
+    $'STATUS 3\nRESERVE 3 4\nCANCEL 4\nSTATUS 3\nLIST\nQUIT\n'
+    $'RESERVE 5 6\nLIST\nCANCEL 5\nSTATUS 6\nQUIT\n'
+    $'RESERVE 7 8\nSTATUS 8\nCANCEL 8\nLIST\nSTATUS 7\nQUIT\n'
+    $'LIST\nRESERVE 9 10\nCANCEL 9\nSTATUS 10\nQUIT\n'
+  )
 else
   CLIENT_COUNT="${CLIENT_COUNT:-5}"
   [[ "$CLIENT_COUNT" =~ ^[0-9]+$ ]] && [ "$CLIENT_COUNT" -ge 5 ] && [ "$CLIENT_COUNT" -le 100 ] || {
@@ -61,6 +70,12 @@ else
   SEAT_ID="${SEAT_ID:-10}"
   [[ "$SEAT_ID" =~ ^([1-9]|1[0-9]|20)$ ]] || { echo "SEAT_ID must be 1-20" >&2; exit 1; }
 fi
+
+demo_command_sequence() {
+  local sequence="${DEMO_COMMANDS[$1]%$'\n'}"
+  printf '%s' "${sequence//$'\n'/ → }"
+}
+
 printf 'demo=%s\nstarted_at=%s\nruntime=%s\nexperiment=%s\nworkers=%s\nclients=%s\ncommand=%s\ntarget_seat=%s\ncontainer=%s\n' \
   "$DEMO_NAME" "$STARTED_AT" "$RUNTIME" "$EXPERIMENT" "${WORKER_COUNT:-unknown}" "$CLIENT_COUNT" "$COMMAND" "$SEAT_ID" \
   "${AIRPLANE_CONTAINER_NAME:-airplane-reservation}" >"$RUN_DIR/summary.txt"
@@ -74,8 +89,18 @@ ui_section "CONFIGURATION"
 ui_kv "Experiment" "$EXPERIMENT"
 ui_kv "Workers" "${WORKER_COUNT:-unknown}"
 ui_kv "Clients" "$CLIENT_COUNT"
-ui_kv "Command" "$COMMAND"
-ui_kv "Target seat" "$SEAT_ID"
+if [ "$DEMO_NAME" = demo1 ]; then
+  ui_kv "Commands" "$DEMO_COMMAND_NAMES"
+  ui_kv "Workload" "$DEMO_WORKLOAD"
+  printf '\n%s%sClient command plans%s\n' "$UI_BOLD" "$UI_WHITE" "$UI_RESET"
+  for ((id = 1; id <= CLIENT_COUNT; ++id)); do
+    printf '  %s%-8s%s  %s\n' \
+      "$UI_CYAN" "Client-$id" "$UI_RESET" "$(demo_command_sequence "$((id - 1))")"
+  done
+else
+  ui_kv "Command" "$COMMAND"
+  ui_kv "Target seat" "$SEAT_ID"
+fi
 ui_kv "Results" "$RUN_DIR"
 LOCAL_LOG_START=1
 if [ "$RUNTIME" = local ]; then LOCAL_LOG_START=$(( $(wc -c <"$SERVER_LOG") + 1 )); fi
@@ -116,7 +141,7 @@ run_client() {
 write_report() {
   local report="$RUN_DIR/report.txt"
   local id seat file command_status cancel_status final_status failure_reason response
-  local reserve_seats reserve_display cancel_seat remaining_seat reservation_ok total_reservations
+  local reserve_seats reserve_display cancel_seat remaining_seat reservation_ok total_reservations sequence
   local success_count=0 failed_count=0 cancelled_count=0 remaining_count=0
 
   if [ "$DEMO_NAME" = demo1 ]; then
@@ -124,8 +149,14 @@ write_report() {
     printf '%s\n' 'AIRPLANE RESERVATION - DEMO 1 RESULT' >>"$report"
     printf '%s\n\n' '============================================================================' >>"$report"
     printf '%s\n' 'CONFIGURATION' '-------------' >>"$report"
-    printf 'Experiment: %s\nWorkers: %s\nClients: %s\nCommand: mixed\nStarted at: %s\n\n' \
-      "$EXPERIMENT" "${WORKER_COUNT:-unknown}" "$CLIENT_COUNT" "$STARTED_AT" >>"$report"
+    printf 'Experiment: %s\nWorkers: %s\nClients: %s\nCommand: mixed\nCommands: %s\nWorkload: %s\nStarted at: %s\n' \
+      "$EXPERIMENT" "${WORKER_COUNT:-unknown}" "$CLIENT_COUNT" \
+      "$DEMO_COMMAND_NAMES" "$DEMO_WORKLOAD" "$STARTED_AT" >>"$report"
+    for ((id = 1; id <= CLIENT_COUNT; ++id)); do
+      sequence="$(demo_command_sequence "$((id - 1))")"
+      printf 'Client %s commands: %s\n' "$id" "$sequence" >>"$report"
+    done
+    printf '\n' >>"$report"
     printf '%s\n' 'CLIENT RESULTS' '--------------' >>"$report"
     printf '%-10s | %-28s | %-21s | %s\n' 'Client' 'Reserved seats' 'Cancelled seat' 'Remains reserved' >>"$report"
     printf '%s\n' '-----------|------------------------------|-----------------------|-----------------' >>"$report"
@@ -236,7 +267,6 @@ write_report() {
   printf 'Seat map snapshot: seat-map.txt\nConflict evidence: seat-conflicts.txt\nClient outputs: clients/\nServer log: server.log\nLive server log: server-live.log\n' >>"$report"
 
   ui_render_report "$report"
-  ui_success "Report saved in: $report"
   [ -t 1 ] || echo "Report saved in: $report"
 }
 
@@ -251,13 +281,7 @@ if [ "$DEMO_NAME" = demo1 ]; then
       echo "Seat $preflight_seat is already reserved; restart the server before Demo 1." >&2; exit 1;
     }
   done
-  commands=(
-    $'LIST\nRESERVE 1 2\nSTATUS 1\nCANCEL 1\nSTATUS 2\nQUIT\n'
-    $'STATUS 3\nRESERVE 3 4\nCANCEL 4\nSTATUS 3\nLIST\nQUIT\n'
-    $'RESERVE 5 6\nLIST\nCANCEL 5\nSTATUS 6\nQUIT\n'
-    $'RESERVE 7 8\nSTATUS 8\nCANCEL 8\nLIST\nSTATUS 7\nQUIT\n'
-    $'LIST\nRESERVE 9 10\nCANCEL 9\nSTATUS 10\nQUIT\n'
-  )
+  commands=("${DEMO_COMMANDS[@]}")
 else
   if [ "$COMMAND" = CANCEL ]; then
     ui_note "Preparing Seat $SEAT_ID as a Client-1 reservation for the CANCEL test."
@@ -353,8 +377,4 @@ if [ "$DEMO_NAME" = demo1 ]; then
   ui_success "Demo 1 finished: each client reserved two seats, cancelled one, and kept one reserved."
 else
   ui_success "Concurrent $COMMAND test finished."
-  if [ "$COMMAND" = RESERVE ] || [ "$COMMAND" = CANCEL ]; then
-    ui_note "Operation failures are expected under contention; compare client results."
-  fi
 fi
-ui_kv "Saved results" "$RUN_DIR"
