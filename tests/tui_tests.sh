@@ -206,24 +206,132 @@ printf '%s\n' \
   'AIRPLANE RESERVATION - CONCURRENT COMMAND RESULT' \
   'CONFIGURATION' \
   'Experiment: sync' \
+  'Workers: 3' \
+  'Clients: 5' \
+  'Command: RESERVE' \
+  'Target seat: 10' \
+  'Started at: 2026-09-25T00:00:00Z' \
   'CLIENT RESULTS' \
   'Client     | Result' \
   'client-1   | SUCCESS (Seat 10)' \
   'client-2   | FAILED: already reserved' \
+  'client-3   | FAILED: no valid response' \
   'SUMMARY' \
   'Successful reservations: 1/5' \
-  'Failed reservations: 4/5' >"$REPORT_SAMPLE"
+  'Failed reservations: 4/5' \
+  'Consistency check: PASSED' \
+  'ARTIFACTS' \
+  'Seat map snapshot: seat-map.txt' \
+  'Server log: server.log' >"$REPORT_SAMPLE"
 OUTPUT="$TEST_DIR/report-renderer.raw"
-if FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_report "$1"' _ "$REPORT_SAMPLE" >"$OUTPUT" 2>&1; then
+if NO_COLOR=1 FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_report "$1"' _ "$REPORT_SAMPLE" >"$OUTPUT" 2>&1; then
   pass 'Interactive result renderer formats a report'
 else
   fail 'Interactive result renderer formats a report'
 fi
-assert_contains "$OUTPUT" '[ CONFIGURATION ]' 'Result renderer emphasizes sections'
-assert_contains "$OUTPUT" '[PASS] Successful reservations: 1/5' 'Result renderer highlights successful totals'
-assert_contains "$OUTPUT" '[FAIL] Failed reservations: 4/5' 'Result renderer highlights failed totals'
-assert_contains "$OUTPUT" 'client-1   | SUCCESS (Seat 10)' 'Result renderer preserves per-client success details'
-assert_contains "$OUTPUT" 'client-2   | FAILED: already reserved' 'Result renderer preserves per-client failure details'
+assert_contains "$OUTPUT" '[ RUN OVERVIEW ]' 'Result dashboard groups run settings'
+assert_contains "$OUTPUT" 'Experiment  : sync' 'Result dashboard identifies the experiment'
+assert_contains "$OUTPUT" 'Workers     : 3' 'Result dashboard identifies the worker count'
+assert_contains "$OUTPUT" 'Command     : RESERVE / Seat 10' 'Result dashboard identifies the command and target'
+assert_contains "$OUTPUT" 'Clients     : 5' 'Result dashboard identifies the client count'
+assert_contains "$OUTPUT" '[ RESULT SUMMARY ]' 'Result dashboard groups totals'
+assert_contains "$OUTPUT" 'SUCCESS' 'Result dashboard labels successful totals'
+assert_contains "$OUTPUT" '1/5' 'Result dashboard preserves successful totals'
+assert_contains "$OUTPUT" 'REJECTED' 'Result dashboard labels expected contention outcomes neutrally'
+assert_contains "$OUTPUT" '4/5' 'Result dashboard preserves rejected totals'
+assert_contains "$OUTPUT" 'CONSISTENCY' 'Result dashboard labels consistency'
+assert_contains "$OUTPUT" 'PASSED' 'Result dashboard highlights passing consistency'
+assert_contains "$OUTPUT" '[ CLIENT RESULTS ]' 'Result dashboard groups per-client outcomes'
+assert_contains "$OUTPUT" 'CLIENT' 'Result dashboard labels the client column'
+assert_contains "$OUTPUT" 'STATUS' 'Result dashboard labels the status column'
+assert_contains "$OUTPUT" 'DETAIL' 'Result dashboard labels the detail column'
+assert_contains "$OUTPUT" 'Client-1' 'Result dashboard identifies the successful client'
+assert_contains "$OUTPUT" 'PASS' 'Result dashboard simplifies per-client success status'
+assert_contains "$OUTPUT" 'Seat 10' 'Result dashboard preserves per-client success details'
+assert_contains "$OUTPUT" 'Client-2' 'Result dashboard identifies the failed client'
+assert_contains "$OUTPUT" 'REJECTED' 'Result dashboard treats a contention loser as rejected, not failed'
+assert_contains "$OUTPUT" 'already reserved' 'Result dashboard preserves per-client failure details'
+assert_contains "$OUTPUT" 'Client-3' 'Result dashboard identifies a client with an unexpected error'
+assert_contains "$OUTPUT" 'ERROR' 'Result dashboard reserves error status for unexpected failures'
+assert_contains "$OUTPUT" 'no valid response' 'Result dashboard preserves unexpected error details'
+assert_contains "$OUTPUT" '[ SAVED EVIDENCE ]' 'Result dashboard links to saved evidence once'
+assert_contains "$OUTPUT" 'Folder' 'Result dashboard keeps one evidence location'
+assert_not_contains "$OUTPUT" '[ CONFIGURATION ]' 'Result dashboard removes the repeated raw configuration section'
+assert_not_contains "$OUTPUT" 'Seat map snapshot:' 'Result dashboard does not repeat every artifact filename'
+assert_not_contains "$OUTPUT" 'SUCCESS (Seat 10)' 'Result dashboard does not repeat raw status wrappers'
+assert_not_contains "$OUTPUT" 'FAILED' 'Result dashboard avoids failure wording for normal contention'
+
+COLOR_OUTPUT="$TEST_DIR/report-renderer-color.raw"
+FORCE_COLOR=1 bash -c 'source scripts/lib/terminal_ui.sh; ui_render_report "$1"' \
+  _ "$REPORT_SAMPLE" >"$COLOR_OUTPUT" 2>&1
+printf -v YELLOW_REJECTED '\033[33mREJECTED'
+printf -v RED_REJECTED '\033[31mREJECTED'
+printf -v RED_ERROR '\033[31mERROR'
+printf -v DIM_STARTED '\033[2mStarted:'
+printf -v YELLOW_STARTED '\033[33mStarted:'
+printf -v CYAN_RUN '\033[36m[ RUN OVERVIEW ]'
+printf -v MAGENTA_SUMMARY '\033[35m[ RESULT SUMMARY ]'
+printf -v WHITE_CLIENTS '\033[37m[ CLIENT RESULTS ]'
+printf -v DIM_EVIDENCE '\033[2m[ SAVED EVIDENCE ]'
+printf -v CYAN_SUMMARY '\033[36m[ RESULT SUMMARY ]'
+printf -v CYAN_CLIENTS '\033[36m[ CLIENT RESULTS ]'
+assert_contains "$COLOR_OUTPUT" "$YELLOW_REJECTED" 'Contention rejection is rendered in yellow'
+assert_not_contains "$COLOR_OUTPUT" "$RED_REJECTED" 'Contention rejection is not rendered in red'
+assert_contains "$COLOR_OUTPUT" "$RED_ERROR" 'Unexpected client errors remain red'
+assert_contains "$COLOR_OUTPUT" "$DIM_STARTED" 'Start time is rendered as muted metadata'
+assert_not_contains "$COLOR_OUTPUT" "$YELLOW_STARTED" 'Start time does not reuse the rejection color'
+assert_contains "$COLOR_OUTPUT" "$CYAN_RUN" 'Run Overview has a cyan information accent'
+assert_contains "$COLOR_OUTPUT" "$MAGENTA_SUMMARY" 'Result Summary has a distinct magenta accent'
+assert_contains "$COLOR_OUTPUT" "$WHITE_CLIENTS" 'Client Results uses a neutral white accent'
+assert_contains "$COLOR_OUTPUT" "$DIM_EVIDENCE" 'Saved Evidence uses a muted accent'
+assert_not_contains "$COLOR_OUTPUT" "$CYAN_SUMMARY" 'Result Summary does not reuse the run accent'
+assert_not_contains "$COLOR_OUTPUT" "$CYAN_CLIENTS" 'Client Results does not reuse the run accent'
+
+DEMO_REPORT_SAMPLE="$TEST_DIR/demo-report-sample.txt"
+printf '%s\n' \
+  'AIRPLANE RESERVATION - DEMO 1 RESULT' \
+  'CONFIGURATION' \
+  'Experiment: sync' \
+  'Workers: 5' \
+  'Clients: 5' \
+  'Command: mixed' \
+  'Commands: LIST, STATUS, RESERVE, CANCEL, QUIT' \
+  'Workload: Reserve 2 seats, cancel 1 seat, keep 1 reserved per client' \
+  'Client 1 commands: LIST → RESERVE 1 2 → STATUS 1 → CANCEL 1 → STATUS 2 → QUIT' \
+  'Started at: 2026-09-25T00:00:00Z' \
+  'CLIENT RESULTS' \
+  'Client     | Reserved seats               | Cancelled seat        | Remains reserved' \
+  'client-1   | SUCCESS (Seats 1, 2)         | SUCCESS (Seat 1)      | SUCCESS (Seat 2)' \
+  'client-2   | SUCCESS (Seats 3, 4)         | SUCCESS (Seat 4)      | SUCCESS (Seat 3)' \
+  'SUMMARY' \
+  'Successful seat reservations: 10/10' \
+  'Failed seat reservations: 0/10' \
+  'Successful cancellations: 5/5' \
+  'Seats remaining reserved: 5/5' \
+  'Consistency check: PASSED' >"$DEMO_REPORT_SAMPLE"
+OUTPUT="$TEST_DIR/demo-report-renderer.raw"
+if NO_COLOR=1 FORCE_COLOR=1 bash -c \
+  'source scripts/lib/terminal_ui.sh; ui_render_report "$1"' \
+  _ "$DEMO_REPORT_SAMPLE" >"$OUTPUT" 2>&1; then
+  pass 'Demo result renderer formats a compact dashboard'
+else
+  fail 'Demo result renderer formats a compact dashboard'
+fi
+assert_contains "$OUTPUT" 'Scenario    : Mixed seat commands' 'Demo dashboard explains the scenario once'
+assert_contains "$OUTPUT" 'Commands: LIST, STATUS, RESERVE, CANCEL, QUIT' 'Demo dashboard lists every exercised command'
+assert_contains "$OUTPUT" 'Workload: Reserve 2 seats, cancel 1 seat, keep 1 reserved per client' 'Demo dashboard explains the fixed command workload'
+assert_contains "$OUTPUT" 'RESERVED' 'Demo dashboard labels reservation progress'
+assert_contains "$OUTPUT" '10/10' 'Demo dashboard shows reservation progress'
+assert_contains "$OUTPUT" 'CANCELLED' 'Demo dashboard labels cancellation progress'
+assert_contains "$OUTPUT" '5/5' 'Demo dashboard shows cancellation and kept totals'
+assert_contains "$OUTPUT" 'KEPT' 'Demo dashboard labels final reserved seats'
+assert_contains "$OUTPUT" 'CONSISTENCY' 'Demo dashboard labels consistency'
+assert_contains "$OUTPUT" 'Client-1' 'Demo dashboard identifies each client'
+assert_contains "$OUTPUT" 'PASS' 'Demo dashboard condenses client status'
+assert_contains "$OUTPUT" '1, 2' 'Demo dashboard keeps reservation details'
+assert_contains "$OUTPUT" '│ 1' 'Demo dashboard keeps cancellation details'
+assert_contains "$OUTPUT" '│ 2' 'Demo dashboard keeps final-seat details'
+assert_not_contains "$OUTPUT" 'SUCCESS (Seats' 'Demo dashboard removes repeated status wrappers'
 
 LOAD_REPORT_SAMPLE="$TEST_DIR/load-report-sample.txt"
 printf '%s\n' \
@@ -305,6 +413,10 @@ assert_contains "$OUTPUT" '● 19 available' 'Seat map totals available seats'
 assert_contains "$OUTPUT" '● 1 reserved' 'Seat map totals reserved seats'
 assert_not_contains "$OUTPUT" '[10:C-1] reserved' 'Seat map does not show a hard-coded owner legend'
 assert_not_contains "$OUTPUT" 'Client-n' 'Seat map does not show a placeholder as data'
+printf -v MAGENTA_RESERVED '\033[35m[02:C-42]'
+printf -v RED_RESERVED '\033[31m[02:C-42]'
+assert_contains "$OUTPUT" "$MAGENTA_RESERVED" 'A normal reserved seat uses neutral magenta'
+assert_not_contains "$OUTPUT" "$RED_RESERVED" 'A normal reserved seat is not rendered as an error'
 
 CONFLICT_SAMPLE="$TEST_DIR/seat-conflicts-sample.txt"
 printf '2|Client-2, Client-7, Client-9|Client-42\n' >"$CONFLICT_SAMPLE"
@@ -316,6 +428,8 @@ else
   fail 'Seat-map renderer exposes conflicting successes'
 fi
 assert_contains "$OUTPUT" '[02:RACE]' 'Conflicted seat is marked as RACE instead of one apparent winner'
+printf -v RED_RACE '\033[31m[02:RACE]'
+assert_contains "$OUTPUT" "$RED_RACE" 'A real seat conflict remains red'
 assert_contains "$OUTPUT" '⚠ 1 conflict' 'Seat map totals detected conflicts'
 assert_contains "$OUTPUT" '⚠ RACE = multiple clients received SUCCESS' 'Conflict legend explains the race marker without a fake owner'
 assert_not_contains "$OUTPUT" '[10:C-1] reserved' 'Conflict map does not show a hard-coded owner legend'

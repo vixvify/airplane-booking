@@ -166,6 +166,10 @@ echo "[PASS] concurrent test rejects unsupported commands"
 demo_output="$(MOCK_DEMO_FINAL=1 bash "$ROOT_DIR/scripts/demo1.sh")"
 demo_report="$(sed -n 's/^Report saved in: //p' <<<"$demo_output" | tail -n 1)"
 [ -f "$demo_report" ] || fail "Demo 1 reservation report was not saved"
+grep -Fq 'Client-1  LIST → RESERVE 1 2 → STATUS 1 → CANCEL 1 → STATUS 2 → QUIT' <<<"$demo_output" ||
+  fail "Demo 1 configuration did not show Client-1's command plan"
+grep -Fq 'Client-5  LIST → RESERVE 9 10 → CANCEL 9 → STATUS 10 → QUIT' <<<"$demo_output" ||
+  fail "Demo 1 configuration did not show Client-5's command plan"
 grep -q 'Successful seat reservations: 10/10' "$demo_report" ||
   fail "Demo 1 report is missing multi-seat reservation totals"
 grep -q 'Successful cancellations: 5/5' "$demo_report" ||
@@ -183,5 +187,11 @@ for expected in \
 done
 grep -q '^Workers: 5$' "$demo_report" ||
   fail "Demo 1 report did not record the running worker count"
+grep -q '^Commands: LIST, STATUS, RESERVE, CANCEL, QUIT$' "$demo_report" ||
+  fail "Demo 1 report did not record the command set"
+grep -Fqx 'Client 1 commands: LIST → RESERVE 1 2 → STATUS 1 → CANCEL 1 → STATUS 2 → QUIT' "$demo_report" ||
+  fail "Demo 1 report did not record Client 1's command sequence"
+grep -Fqx 'Client 5 commands: LIST → RESERVE 9 10 → CANCEL 9 → STATUS 10 → QUIT' "$demo_report" ||
+  fail "Demo 1 report did not record Client 5's command sequence"
 echo "[PASS] Demo 1 report includes reservation and cancellation totals"
 echo "Script tests: 19 passed, 0 failed (mock Docker transport)"
