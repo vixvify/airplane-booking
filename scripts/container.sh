@@ -87,7 +87,7 @@ case "$action" in
     # immediate restart to fail with "name is already in use". Do not report a
     # completed stop until the daemon can no longer inspect the old container.
     for _ in {1..100}; do
-      if ! "$DOCKER" inspect "$CONTAINER" >/dev/null 2>&1; then
+      if ! "$DOCKER" inspect --type container "$CONTAINER" >/dev/null 2>&1; then
         exit 0
       fi
       sleep 0.05

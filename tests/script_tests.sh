@@ -44,6 +44,8 @@ MOCK_REMOVAL_POLLS_FILE="$removal_polls" \
   bash "$ROOT_DIR/scripts/container.sh" stop >/dev/null
 [ "$(cat "$removal_polls")" = 0 ] ||
   fail "container stop returned before Docker released the container name"
+grep -Fq 'inspect --type container airplane-reservation' "$MOCK_TRACE" ||
+  fail "container removal wait did not restrict inspect to containers"
 echo "[PASS] container stop waits until Docker releases the container name"
 
 if bash "$ROOT_DIR/scripts/container.sh" start unknown \
