@@ -4,9 +4,53 @@
 
 ## ภาพรวม
 
-[![แผนภาพระบบ: client 1–5, request/response queues, server และ worker 1–3 พร้อมรายละเอียดภายใน](architecture.svg)](architecture.svg)
+ภาพนี้แสดงเฉพาะ runtime ภายใน container เพื่อให้เห็นเส้นทาง IPC ชัดเจน ส่วนขั้นตอน build, `docker run` และ `docker exec` แยกอธิบายใน [Docker Build and Runtime Flow](docker-runtime-flow.md)
 
-อ่านภาพจากซ้ายไปขวา: client ส่งคำสั่งเข้า **request queue** → worker ตัวหนึ่งรับไปทำงานกับสถานะที่นั่ง → ส่งผลเข้า **response queue** → client รับเฉพาะคำตอบที่ตรงกับ `requestId` ของตัวเอง เส้นสีน้ำเงินคือ request, สีเขียวคือ response, สีเทาคือการเริ่ม service หรือการเข้าถึง state ภายใน server
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#111827", "primaryTextColor": "#f8fafc", "lineColor": "#94a3b8", "fontFamily": "Arial"}}}%%
+block-beta
+    columns 5
+
+    CLIENT_SEND["CLIENT · SEND REQUEST<br/><br/>Client 1 .. Client 5+<br/>create requestId<br/>build RequestMessage<br/>msgsnd request"]
+    space
+    REQUEST[("REQUEST QUEUE<br/><br/>System V IPC<br/>mtype = 1<br/>RequestMessage")]
+    space
+    SERVER_PROCESS["SERVER · RECEIVE / PROCESS<br/><br/>msgrcv(mtype = 1)<br/>validate + dispatch worker<br/>parse command<br/>lock in sync mode<br/>read / update seats[20]"]
+
+    CLIENT_WAIT["CLIENT · WAIT RESPONSE<br/><br/>msgrcv(requestId)<br/>timeout 10 seconds<br/>validate clientId + requestId<br/>print result"]
+    space
+    RESPONSE[("RESPONSE QUEUE<br/><br/>System V IPC<br/>mtype = requestId<br/>ResponseMessage")]
+    space
+    SERVER_SEND["SERVER · SEND RESPONSE<br/><br/>build ResponseMessage<br/>set mtype = requestId<br/>include clientId + requestId<br/>msgsnd response"]
+
+    CLIENT_SEND --> REQUEST
+    REQUEST --> SERVER_PROCESS
+    SERVER_PROCESS --> SERVER_SEND
+    SERVER_SEND --> RESPONSE
+    RESPONSE --> CLIENT_WAIT
+
+    style CLIENT_SEND fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
+    style CLIENT_WAIT fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
+    style REQUEST fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
+    style RESPONSE fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
+    style SERVER_PROCESS fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
+    style SERVER_SEND fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
+```
+
+องค์ประกอบทั้งหมดอยู่ภายใน Docker container เดียว กล่องสีเขียวคือ state ของ Client, สีส้มคือ System V queues สองชุดที่แยกจากกัน และสีม่วงคือ state ของ Server แถวบนแสดง request จากซ้ายไปขวา ส่วนแถวล่างแสดง response จากขวากลับมาซ้าย
+
+### ลำดับของหนึ่ง request
+
+ตัวอย่างเมื่อ Client 1 ส่งคำสั่ง `RESERVE 10`:
+
+| ขั้น | ผู้ทำงาน | สิ่งที่เกิดขึ้น |
+| ---: | --- | --- |
+| 1 | Client 1 | สร้าง `RequestMessage` ที่มี `clientId=1`, `requestId` และ `command="RESERVE 10"` |
+| 2 | Client 1 | ส่ง message เข้า request queue โดยใช้ `mtype=1` |
+| 3 | Worker ตัวหนึ่ง | รับ request จากคิว แล้ว parse และ validate คำสั่ง |
+| 4 | Reservation logic | โหมด `sync` ล็อก Seat 10 ก่อนตรวจและแก้สถานะ ส่วน `nosync` ข้าม lock |
+| 5 | Worker | สร้าง `ResponseMessage` แล้วส่งเข้า response queue โดยใช้ `mtype=requestId` |
+| 6 | Client 1 | รับเฉพาะ response ที่ตรงกับ `requestId` ของตัวเอง แล้วแสดงผล |
 
 ### แต่ละส่วนทำอะไร
 
@@ -17,7 +61,7 @@
 | Request queue | System V `msgget`/`msgsnd`/`msgrcv` | รับคำสั่งจากทุก client ร่วมกัน; request ทุกอันใช้ `mtype = 1` |
 | Response queue | System V message queue อีกชุด | รับคำตอบจาก workers; `mtype = requestId` เพื่อให้แต่ละคำขออ่านผลของตนเองได้ ไม่ต้องมี private queue |
 | Server process | `./server <sync|nosync> <worker_count>` | เป็น process หลักของ container; กัน server ซ้ำด้วย `flock`, สร้าง queues, เปิด worker threads, ถือ seat state และลบ queues เมื่อปิดตามปกติ |
-| Worker 1–3 | C++ `std::thread` ภายใน server process | แย่งกันรับ request จากคิวเดียว, parse/validate คำสั่ง, เรียก reservation logic และส่ง response |
+| Worker threads | C++ `std::thread` จำนวนตาม `<worker_count>` | แย่งกันรับ request จากคิวเดียว, parse/validate คำสั่ง, เรียก reservation logic และส่ง response |
 | Seat state | `int seats[20]` ใน memory ของ server | `0` หมายถึงว่าง; ค่า `clientId` ที่เป็นบวกหมายถึง client นั้นจองไว้; รีเซ็ตเมื่อเริ่ม server ใหม่ |
 | Seat locks | `std::mutex seatMutexes[20]` | ล็อกแยกตามที่นั่งในโหมด `sync`; โหมด `nosync` ตั้งใจไม่ใช้เพื่อสาธิต race condition |
 
@@ -27,21 +71,11 @@
 
 `ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` ใช้ path เดียวกันแต่คนละ project ID เพื่อสร้าง key ของ request/response queue. **Queue messages ไม่ได้ถูกเก็บเป็นไฟล์ใต้ `/ipc`**: ตัว queue อยู่ใน kernel ส่วน directory `/ipc` สร้างไว้ใน Dockerfile เพื่อให้ `ftok` ใช้อ้างอิง และมีไฟล์ `/ipc/server.lock` สำหรับ `flock` ป้องกันการเปิด server ซ้ำ ระบบนี้ไม่ได้ใช้ System V semaphore; ตัวป้องกัน race ของที่นั่งคือ C++ `std::mutex`
 
-## เส้นทางของหนึ่งคำสั่ง
-
-ตัวอย่าง client ส่ง `RESERVE 10`:
-
-1. `./client` สร้าง `RequestMessage` ที่มี `clientId`, `requestId`, `command` แล้วส่งเข้า request queue โดยกำหนด `mtype = 1`.
-2. Worker ตัวใดตัวหนึ่งรับ message จากคิว ตรวจรูปแบบ message แล้ว parse คำสั่งเป็น operation กับ seat ID.
-3. Reservation logic ตรวจช่วงที่นั่ง 1–20 และสถานะการจอง หากเป็นโหมด `sync` จะใช้ mutex ของที่นั่งก่อนตรวจและแก้ค่า; หากเป็น `nosync` จะข้าม lock เพื่อให้เห็น race.
-4. Worker ส่ง `ResponseMessage` เข้า response queue โดยกำหนด `mtype` เป็น `requestId` ของคำขอ และส่งเฉพาะจำนวน bytes ที่มีข้อความตอบกลับจริง.
-5. Client อ่านด้วย `msgrcv(..., requestId, ...)` แล้วตรวจ `clientId` และ `requestId` ใน payload อีกครั้งก่อนแสดงผล.
-
-คำสั่งที่ worker รองรับคือ `LIST` (ทุกที่นั่ง), `STATUS <seat_id>`, `RESERVE <seat_id> [seat_id...]`, `CANCEL <seat_id> [seat_id...]` และ `QUIT`. `QUIT` ส่ง `GOODBYE` กลับและจบ client นั้น ไม่ได้ปิด server
-
-### Message ที่วิ่งในคิว
+## Message ที่วิ่งในคิว
 
 โครงสร้างจริงอยู่ใน [`src/models/message.h`](../src/models/message.h); ค่าคงที่อยู่ใน [`src/constants/constants.h`](../src/constants/constants.h)
+
+คำสั่งที่ส่งผ่าน `command` ได้แก่ `LIST`, `STATUS <seat_id>`, `RESERVE <seat_id> [seat_id...]`, `CANCEL <seat_id> [seat_id...]` และ `QUIT`. คำสั่ง `QUIT` จบเฉพาะ client process นั้น ไม่ได้ปิด server
 
 | Field | Request | Response |
 | --- | --- | --- |
