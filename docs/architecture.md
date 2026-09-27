@@ -87,7 +87,7 @@ Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` 
 | `src/ipc/` | สร้าง/เปิด message queues, ส่งและจับคู่ message, กัน server ซ้ำ |
 | `src/server/` | lifecycle ของ server, worker threads และ dispatch คำสั่ง |
 | `src/reservation/` | seat state, validation, reserve/cancel และ mutex |
-| `src/load_test/` | concurrent load generator และตัวเลขผลการทดสอบ |
+| `src/benchmark/` | concurrent load generator และตัวเลขผลการทดสอบ |
 | `src/utils/` | parser, logger และ random delay |
 | `Dockerfile`, `scripts/container.sh` | image และการเริ่ม/หยุด server container เดียว |
 | `scripts/`, `tests/` | คำสั่ง demo/เก็บผล และชุดทดสอบ |

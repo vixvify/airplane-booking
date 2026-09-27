@@ -1,3 +1,4 @@
+// Concurrent benchmark executable used by the load-test wrappers.
 #include "../constants/constants.h"
 #include "../ipc/message_queue.h"
 #include "../utils/cli_parser.h"
