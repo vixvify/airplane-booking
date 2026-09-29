@@ -126,7 +126,8 @@ MessageQueue MessageQueue::createResponses() {
 std::string exchangeCommand(
     int requestQueueId, int responseQueueId,
     int clientId, const std::string& command,
-    std::chrono::milliseconds timeout
+    std::chrono::milliseconds timeout,
+    InFlightTracker* tracker
 ) {
     if (command.size() >= sizeof(RequestMessage::command)
         || command.find('\0') != std::string::npos) {
@@ -151,30 +152,48 @@ std::string exchangeCommand(
         waitForRetry(deadline, "request queue timeout (request was not sent)");
     }
 
-    ResponseMessage response{};
+   
+    if (tracker) {
+        tracker->onSent();
+    }
+    bool sent = (tracker != nullptr);
 
-    ssize_t receivedBytes;
-    while ((receivedBytes = msgrcv(responseQueueId, &response,
-                                  sizeof(response) - sizeof(long),
-                                  responseType, IPC_NOWAIT)) == -1) {
-        if (errno != ENOMSG && errno != EINTR) {
-            fail("receive response");
+    try {
+        ResponseMessage response{};
+
+        ssize_t receivedBytes;
+        while ((receivedBytes = msgrcv(responseQueueId, &response,
+                                      sizeof(response) - sizeof(long),
+                                      responseType, IPC_NOWAIT)) == -1) {
+            if (errno != ENOMSG && errno != EINTR) {
+                fail("receive response");
+            }
+            waitForRetry(deadline,
+                "response timeout (operation outcome unknown; check STATUS before retrying)");
         }
-        waitForRetry(deadline,
-            "response timeout (operation outcome unknown; check STATUS before retrying)");
-    }
 
-    const size_t headerBytes = offsetof(ResponseMessage, response) - sizeof(long);
-    if (receivedBytes <= static_cast<ssize_t>(headerBytes)
-        || memchr(response.response, '\0', receivedBytes - headerBytes) == nullptr) {
-        throw std::runtime_error("invalid response payload");
-    }
+        if (sent) {
+            tracker->onReceived();
+            sent = false;
+        }
 
-    if (response.clientId != clientId || response.requestId != request.requestId) {
-        throw std::runtime_error("response correlation mismatch");
+        const size_t headerBytes = offsetof(ResponseMessage, response) - sizeof(long);
+        if (receivedBytes <= static_cast<ssize_t>(headerBytes)
+            || memchr(response.response, '\0', receivedBytes - headerBytes) == nullptr) {
+            throw std::runtime_error("invalid response payload");
+        }
+
+        if (response.clientId != clientId || response.requestId != request.requestId) {
+            throw std::runtime_error("response correlation mismatch");
+        }
+
+        return response.response;
+    } catch (...) {
+        if (sent) {
+            tracker->onReceived();
+        }
+        throw;
     }
-    
-    return response.response;
 }
 
 }
