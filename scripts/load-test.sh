@@ -18,7 +18,7 @@ OPERATION="${3^^}"
 SEAT_ID="${4:-}"
 [[ "$TOTAL_REQUESTS" =~ ^[1-9][0-9]*$ ]] || usage
 [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]] || usage
-case "$OPERATION" in STATUS|RESERVE|CANCEL) ;; *) usage ;; esac
+case "$OPERATION" in STATUS|RESERVE|CANCEL|MIXED) ;; *) usage ;; esac
 if [ -n "$SEAT_ID" ]; then
   [[ "$SEAT_ID" =~ ^([1-9]|1[0-9]|20)$ ]] || usage
 fi
@@ -100,6 +100,11 @@ Completion rate: $(extract_metric 'Completion Rate')
 Total time: $(extract_metric 'Total Time')
 Throughput: $(extract_metric 'Throughput')
 Average latency: $(extract_metric 'Average Latency')
+p95 latency: $(extract_metric 'p95 Latency')
+p99 latency: $(extract_metric 'p99 Latency')
+Max latency: $(extract_metric 'Max Latency')
+Peak in-flight: $(extract_metric 'Peak In-Flight')
+Average in-flight: $(extract_metric 'Avg In-Flight')
 Consistency check: $([ "$CONFLICT_COUNT" -gt 0 ] && printf 'FAILED (%s seat conflict detected)' "$CONFLICT_COUNT" || printf 'PASSED')
 
 ARTIFACTS
