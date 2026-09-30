@@ -37,7 +37,6 @@ int main(int argc, char* argv[]) {
     try {
         ipc::ServerLock serverLock;
         auto requests = ipc::MessageQueue::createRequests();
-        auto responses = ipc::MessageQueue::createResponses();
         setSynchronization(mode == "sync");
 
         sigset_t signals;
@@ -52,17 +51,18 @@ int main(int argc, char* argv[]) {
         std::cout << std::unitbuf
                   << "Airplane Reservation Server started\n"
                   << "Request Queue ID: " << requests.id() << "\n"
-                  << "Response Queue ID: " << responses.id() << "\n"
+                  << "Reply Queues: private per client\n"
                   << "Workers: " << workerCount << "\n"
                   << "Synchronization: " << (mode == "sync" ? "enabled" : "disabled") << "\n";
 
+        WorkQueue workQueue;
         std::vector<std::thread> workers;
+        std::thread receiver;
         try {
             for (int workerId = 1; workerId <= workerCount; ++workerId) {
-                workers.emplace_back(
-                    worker, workerId, requests.id(), responses.id()
-                );
+                workers.emplace_back(worker, workerId, std::ref(workQueue));
             }
+            receiver = std::thread(receiveRequests, requests.id(), std::ref(workQueue));
             int signalNumber = 0;
             const int waitError = sigwait(&signals, &signalNumber);
             if (waitError != 0) {
@@ -71,16 +71,21 @@ int main(int argc, char* argv[]) {
             std::cout << "Shutting down server (Signal " << signalNumber << ")...\n";
         } catch (...) {
             requests.remove();
+            workQueue.stop();
+            if (receiver.joinable()) {
+                receiver.join();
+            }
             for (auto& thread : workers) {
                 thread.join();
             }
             throw;
         }
         requests.remove();
+        workQueue.stop();
+        receiver.join();
         for (auto& thread : workers) {
             thread.join();
         }
-        responses.remove();
     } catch (const std::exception& error) {
         std::cerr << "ERROR: " << error.what() << "\n";
         return 1;

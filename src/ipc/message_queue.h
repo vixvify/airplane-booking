@@ -12,11 +12,15 @@ public:
     ~MessageQueue();
     MessageQueue(const MessageQueue&) = delete;
     MessageQueue& operator=(const MessageQueue&) = delete;
+    MessageQueue(MessageQueue&& other) noexcept
+        : id_(other.id_), owner_(other.owner_) {
+        other.id_ = -1;
+        other.owner_ = false;
+    }
 
     static MessageQueue openRequests();
-    static MessageQueue openResponses();
     static MessageQueue createRequests();
-    static MessageQueue createResponses();
+    static MessageQueue createPrivateResponse();
     int id() const { return id_; }
     void remove();
 
@@ -47,7 +51,7 @@ struct InFlightTracker {
 };
 
 std::string exchangeCommand(
-    int requestQueueId, int responseQueueId,
+    int requestQueueId, int replyQueueId,
     int clientId, const std::string& command,
     std::chrono::milliseconds timeout = std::chrono::seconds(10),
     InFlightTracker* tracker = nullptr

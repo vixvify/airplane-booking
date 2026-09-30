@@ -16,7 +16,6 @@ constexpr int AVAILABLE = 0;
 
 constexpr const char* QUEUE_PATH = "/ipc";
 constexpr int REQUEST_QUEUE_PROJECT_ID = 'A';
-constexpr int RESPONSE_QUEUE_PROJECT_ID = 'B';
 
 }
 

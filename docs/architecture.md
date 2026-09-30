@@ -1,127 +1,102 @@
 # System Architecture
 
-ระบบจองที่นั่งนี้รันบน Linux ภายใน **Docker container เดียว** โดยมี server process และ client processes อย่างน้อย 5 ตัวที่เปิดเพิ่มด้วย `docker exec`. Client กับ server คุยกันผ่าน **System V message queues สองชุด** ส่วน worker threads และสถานะที่นั่งอยู่ภายใน server process เดียวกัน
+ระบบจองที่นั่งรันบน Linux ใน Docker container เดียว `./server` เป็น process หลัก และ `./client` แต่ละตัวเป็น process ที่เปิดด้วย `docker exec` ทุก process ใช้ IPC namespace เดียวกัน ที่นั่ง 20 ที่และ worker threads อยู่ใน memory ของ server
 
-## ภาพรวม
-
-ภาพนี้แสดงเฉพาะ runtime ภายใน container เพื่อให้เห็นเส้นทาง IPC ชัดเจน ส่วนขั้นตอน build, `docker run` และ `docker exec` แยกอธิบายใน [Docker Build and Runtime Flow](docker-runtime-flow.md)
+## ภาพรวมระบบ: จากคำขอถึงคำตอบ
 
 ```mermaid
-%%{init: {"theme": "base", "themeVariables": {"background": "#111827", "primaryTextColor": "#f8fafc", "lineColor": "#94a3b8", "fontFamily": "Arial"}}}%%
-block-beta
-    columns 5
+%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 55}, "themeVariables": {"background": "#111827", "primaryTextColor": "#f8fafc", "lineColor": "#94a3b8", "fontFamily": "Arial"}}}%%
+flowchart LR
+    SEND["CLIENTS 1 .. N · SEND<br/>สร้าง private queue และ requestId<br/>แนบ replyQueueId ใน request"]
+    REQUEST[("SHARED REQUEST QUEUE<br/>System V · mtype = 1")]
+    RECEIVER["SERVER RECEIVER<br/>thread เดียว · msgrcv<br/>ตรวจรูปแบบ request"]
+    WORK_QUEUE["INTERNAL WORK QUEUE<br/>deque · mutex · condition variable<br/>สูงสุด 1024 งาน"]
+    WORKERS["WORKER POOL 1 .. N<br/>parse / execute · seats[20]<br/>sync: per-seat mutexes[20]<br/>ส่งตรงตาม replyQueueId"]
+    Q1[("PRIVATE REPLY QUEUE 1<br/>System V · IPC_PRIVATE")]
+    Q2[("PRIVATE REPLY QUEUE 2<br/>System V · IPC_PRIVATE")]
+    QN[("PRIVATE REPLY QUEUE N<br/>System V · IPC_PRIVATE")]
+    C1["CLIENT 1 · RECEIVE<br/>msgrcv(requestId)"]
+    C2["CLIENT 2 · RECEIVE<br/>msgrcv(requestId)"]
+    CN["CLIENT N · RECEIVE<br/>msgrcv(requestId)"]
 
-    CLIENT_SEND["CLIENT · SEND REQUEST<br/><br/>Client 1 .. Client 5+<br/>create requestId<br/>build RequestMessage<br/>msgsnd request"]
-    space
-    REQUEST[("REQUEST QUEUE<br/><br/>System V IPC<br/>mtype = 1<br/>RequestMessage")]
-    space
-    SERVER_PROCESS["SERVER · RECEIVE / PROCESS<br/><br/>msgrcv(mtype = 1)<br/>validate + dispatch worker<br/>parse command<br/>lock in sync mode<br/>read / update seats[20]"]
+    SEND -->|"msgsnd RequestMessage"| REQUEST
+    REQUEST -->|msgrcv| RECEIVER
+    RECEIVER -->|dispatch| WORK_QUEUE
+    WORK_QUEUE -->|pop| WORKERS
+    WORKERS -->|"msgsnd ResponseMessage"| Q1
+    WORKERS --> Q2
+    WORKERS --> QN
+    Q1 --> C1
+    Q2 --> C2
+    QN --> CN
 
-    CLIENT_WAIT["CLIENT · WAIT RESPONSE<br/><br/>msgrcv(requestId)<br/>timeout 10 seconds<br/>validate clientId + requestId<br/>print result"]
-    space
-    RESPONSE[("RESPONSE QUEUE<br/><br/>System V IPC<br/>mtype = requestId<br/>ResponseMessage")]
-    space
-    SERVER_SEND["SERVER · SEND RESPONSE<br/><br/>build ResponseMessage<br/>set mtype = requestId<br/>include clientId + requestId<br/>msgsnd response"]
-
-    CLIENT_SEND --> REQUEST
-    REQUEST --> SERVER_PROCESS
-    SERVER_PROCESS --> SERVER_SEND
-    SERVER_SEND --> RESPONSE
-    RESPONSE --> CLIENT_WAIT
-
-    style CLIENT_SEND fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
-    style CLIENT_WAIT fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
-    style REQUEST fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
-    style RESPONSE fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
-    style SERVER_PROCESS fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
-    style SERVER_SEND fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
+    classDef server fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
+    classDef request fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
+    classDef internal fill:#374151,stroke:#d1d5db,color:#f9fafb,stroke-width:3px
+    classDef reply fill:#0c4a6e,stroke:#38bdf8,color:#f0f9ff,stroke-width:3px
+    classDef client fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
+    class RECEIVER,WORKERS server
+    class REQUEST request
+    class WORK_QUEUE internal
+    class Q1,Q2,QN reply
+    class SEND,C1,C2,CN client
 ```
 
-องค์ประกอบทั้งหมดอยู่ภายใน Docker container เดียว กล่องสีเขียวคือ state ของ Client, สีส้มคือ System V queues สองชุดที่แยกจากกัน และสีม่วงคือ state ของ Server แถวบนแสดง request จากซ้ายไปขวา ส่วนแถวล่างแสดง response จากขวากลับมาซ้าย
+กล่อง **SEND** และ **RECEIVE** คือคนละช่วงของ client process เดียวกัน ไม่ใช่ client สองชุด Client 1, 2 และ N ส่งคำขอผ่าน shared request queue เดียว แต่แต่ละตัวสร้าง private reply queue ของตนเอง เมื่อ Worker ทำงานเสร็จจะเลือก **เพียงคิวเดียว** จาก `replyQueueId` ใน request แล้วส่งคำตอบตรงเข้าคิวนั้น เส้นจาก Worker ไป Queue 1, 2 และ N จึงแสดงทางเลือก ไม่ใช่การส่งคำตอบเดียวไปทุกคิว
 
-### ลำดับของหนึ่ง request
+Server Receiver เป็น thread เดียวที่อ่าน shared request queue แล้วส่งงานต่อให้ worker ผ่านคิวใน memory เมื่อคิวงานเต็ม Receiver จะรอให้ worker ดึงงานออกก่อน การรอ/ปลุกใช้ `std::condition_variable` ใน server process หนึ่ง client process สร้าง private queue หนึ่งชุดตอนเริ่มทำงานและลบเมื่อจบ process ส่วน `load_test` สร้างหนึ่ง private queue ต่อ logical client thread
 
-ตัวอย่างเมื่อ Client 1 ส่งคำสั่ง `RESERVE 10`:
+## ลำดับของหนึ่งคำขอ
 
-| ขั้น | ผู้ทำงาน | สิ่งที่เกิดขึ้น |
-| ---: | --- | --- |
-| 1 | Client 1 | สร้าง `RequestMessage` ที่มี `clientId=1`, `requestId` และ `command="RESERVE 10"` |
-| 2 | Client 1 | ส่ง message เข้า request queue โดยใช้ `mtype=1` |
-| 3 | Worker ตัวหนึ่ง | รับ request จากคิว แล้ว parse และ validate คำสั่ง |
-| 4 | Reservation logic | โหมด `sync` ล็อก Seat 10 ก่อนตรวจและแก้สถานะ ส่วน `nosync` ข้าม lock |
-| 5 | Worker | สร้าง `ResponseMessage` แล้วส่งเข้า response queue โดยใช้ `mtype=requestId` |
-| 6 | Client 1 | รับเฉพาะ response ที่ตรงกับ `requestId` ของตัวเอง แล้วแสดงผล |
+1. Client เปิด shared request queue และสร้าง private reply queue ด้วย `msgget(IPC_PRIVATE, IPC_CREAT | 0600)`
+2. Client สร้าง `RequestMessage` ที่มี `clientId`, `requestId`, `replyQueueId` และคำสั่ง เช่น `RESERVE 10` แล้วส่งด้วย `msgsnd`
+3. Server Receiver รับด้วย `msgrcv(mtype=1)`, ตรวจความยาวและ field สำคัญ แล้ว push ลง internal work queue
+4. Worker หนึ่งตัว pop งาน, parse คำสั่ง แล้วเรียก reservation logic กับ `seats[20]`
+5. Worker สร้าง `ResponseMessage` โดยใช้ `mtype=requestId` และส่งตรงไปยัง `replyQueueId`
+6. Client รับจาก private queue ของตนด้วย `msgrcv(requestId)`, ตรวจ `clientId` และ `requestId`, แล้วแสดงผล
+7. เมื่อ client จบ Queue ที่ตนสร้างจะถูกลบด้วย `msgctl(IPC_RMID)`; เมื่อ server จบจะลบ shared request queue และปลุก threads ที่รอ internal work queue
 
-### แต่ละส่วนทำอะไร
-
-| ส่วนในภาพ | สิ่งที่ใช้จริง | หน้าที่ |
+| Field | RequestMessage | ResponseMessage |
 | --- | --- | --- |
-| Host scripts | `scripts/`, `tests/` และ Docker CLI | Build image, เริ่ม/หยุด container, เปิด client, รัน demo/load test และเก็บผลลง `results/` บน host |
-| Client 1–5 | `./client <client_id>` processes | เปิดผ่าน `docker exec` ภายใน container เดียวกับ server; สามารถเปิด client เพิ่มโดยไม่ต้องสร้าง container ใหม่ |
-| Request queue | System V `msgget`/`msgsnd`/`msgrcv` | รับคำสั่งจากทุก client ร่วมกัน; request ทุกอันใช้ `mtype = 1` |
-| Response queue | System V message queue อีกชุด | รับคำตอบจาก workers; `mtype = requestId` เพื่อให้แต่ละคำขออ่านผลของตนเองได้ ไม่ต้องมี private queue |
-| Server process | `./server <sync|nosync> <worker_count>` | เป็น process หลักของ container; กัน server ซ้ำด้วย `flock`, สร้าง queues, เปิด worker threads, ถือ seat state และลบ queues เมื่อปิดตามปกติ |
-| Worker threads | C++ `std::thread` จำนวนตาม `<worker_count>` | แย่งกันรับ request จากคิวเดียว, parse/validate คำสั่ง, เรียก reservation logic และส่ง response |
-| Seat state | `int seats[20]` ใน memory ของ server | `0` หมายถึงว่าง; ค่า `clientId` ที่เป็นบวกหมายถึง client นั้นจองไว้; รีเซ็ตเมื่อเริ่ม server ใหม่ |
-| Seat locks | `std::mutex seatMutexes[20]` | ล็อกแยกตามที่นั่งในโหมด `sync`; โหมด `nosync` ตั้งใจไม่ใช้เพื่อสาธิต race condition |
+| `mtype` | `1` เพื่อให้ Server Receiver รับทุกคำขอ | `requestId` เพื่อเลือกคำตอบของ request นั้นใน private queue |
+| `clientId` | เจ้าของคำสั่งและที่นั่ง | ยืนยันว่าเป็นคำตอบของ client นี้ |
+| `requestId` | ID ใหม่สำหรับแต่ละคำขอ | ยืนยันการจับคู่กับคำขอต้นทาง |
+| `replyQueueId` | ID ของ private queue ที่ client สร้าง | — |
+| `command[128]` | คำสั่งที่ลงท้ายด้วย NUL | — |
+| `response[2048]` | — | ผลลัพธ์ที่ลงท้ายด้วย NUL; ส่งเฉพาะจำนวน bytes ที่ใช้จริง |
 
-## ทำไมใช้ container เดียวแล้วคุยกันได้
+`requestId` ใช้จับคู่คำตอบ แม้คิวจะแยกตาม client เพราะ client เดียวสามารถส่งหลายคำขอต่อเนื่องได้ `clientId` ใช้ระบุเจ้าของที่นั่งและตรวจสิทธิ์ `CANCEL`
 
-`scripts/container.sh` ใช้ Dockerfile build image แล้วเปิด container โดยให้ `./server` เป็น process หลัก เมื่อใช้ `docker exec` เปิด `./client` เพิ่ม ทุก process อยู่ใน container เดียวกัน จึงเห็น IPC namespace และ path `/ipc` เดียวกันโดยอัตโนมัติ ไม่ต้องตั้งค่า `ipc: host` หรือ mount shared volume
+## ที่นั่งและการทดลอง
 
-`ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` ใช้ path เดียวกันแต่คนละ project ID เพื่อสร้าง key ของ request/response queue. **Queue messages ไม่ได้ถูกเก็บเป็นไฟล์ใต้ `/ipc`**: ตัว queue อยู่ใน kernel ส่วน directory `/ipc` สร้างไว้ใน Dockerfile เพื่อให้ `ftok` ใช้อ้างอิง และมีไฟล์ `/ipc/server.lock` สำหรับ `flock` ป้องกันการเปิด server ซ้ำ ระบบนี้ไม่ได้ใช้ System V semaphore; ตัวป้องกัน race ของที่นั่งคือ C++ `std::mutex`
+Server ถือ `int seats[20]` และ `std::mutex seatMutexes[20]` ใน process เดียวกัน `RESERVE`/`CANCEL` หลายที่นั่งตรวจทุกที่ก่อนอัปเดต จึงเป็น transaction แบบ all-or-nothing ในโหมด `sync` worker ล็อกที่นั่งตามลำดับ ID ตลอดช่วงตรวจและอัปเดต; `STATUS` ล็อกหนึ่งที่และ `LIST` ล็อกทั้ง 20 ที่เพื่ออ่าน snapshot
 
-## Message ที่วิ่งในคิว
-
-โครงสร้างจริงอยู่ใน [`src/models/message.h`](../src/models/message.h); ค่าคงที่อยู่ใน [`src/constants/constants.h`](../src/constants/constants.h)
-
-คำสั่งที่ส่งผ่าน `command` ได้แก่ `LIST`, `STATUS <seat_id>`, `RESERVE <seat_id> [seat_id...]`, `CANCEL <seat_id> [seat_id...]` และ `QUIT`. คำสั่ง `QUIT` จบเฉพาะ client process นั้น ไม่ได้ปิด server
-
-| Field | Request | Response |
+| Experiment | Server command | ผลที่ต้องสังเกต |
 | --- | --- | --- |
-| `mtype` | `1` สำหรับทุก request | `requestId` ของ request ต้นทาง |
-| `clientId` | เจ้าของคำสั่ง/ใช้ตรวจสิทธิ์ยกเลิก | ส่งกลับเพื่อยืนยันว่าตอบถูก client |
-| `requestId` | เลขระบุคำขอแต่ละครั้ง | ส่งกลับเพื่อยืนยันการจับคู่ |
-| `command[128]` | ข้อความคำสั่งไม่เกิน 127 bytes + NUL | — |
-| `response[2048]` | — | ข้อความผลลัพธ์ + NUL; ส่งเฉพาะความยาวที่ใช้จริง |
+| 1: Sequential | `./server sync 1` | หนึ่ง worker ประมวลผลทีละ request |
+| 2: Nosync | `./server nosync 3` | หลาย worker ไม่ล็อก seat state และอาจรายงานผู้จองสำเร็จหลายราย |
+| 3: Sync | `./server sync 3` | หลาย worker ล็อกที่นั่งเป้าหมาย ผู้จองที่นั่งเดียวกันสำเร็จหนึ่งราย |
 
-ระบบมี **สอง shared queues** ไม่ใช่หนึ่งคิวต่อ client หรือหนึ่งคิวต่อ worker. Client มี deadline 10 วินาทีในการส่ง request/รอ response; หากรอ response จน timeout ผลของ operation อาจยังไม่แน่นอน จึงควรตรวจ `STATUS` ก่อนส่งคำสั่งซ้ำ
+โหมด `nosync` ตั้งใจขยายช่วงระหว่างตรวจและเขียนด้วย delay 50–500 ms เพื่อสาธิต race condition ตัว internal work queue และ private reply queues ทำงานเหมือนกันในทุกโหมด เปลี่ยนเฉพาะจำนวน worker และการล็อกที่นั่ง
 
-## ที่นั่ง, transaction และการล็อก
+## Timeout และการดูแลคิว
 
-ทุก worker เรียก reservation logic ใน server process เดียวกัน จึงเห็น `seats[20]` ชุดเดียวกัน การจอง/ยกเลิกหลายที่นั่งจะ sort และตัด seat ID ซ้ำ ตรวจข้อมูลและสถานะของทุกที่ก่อนอัปเดต; ถ้าตรวจไม่ผ่านจะไม่เปลี่ยนที่นั่งใดของคำขอนั้น
+Client รอส่ง request และรอ response ภายใน 10 วินาที หากส่ง request ไม่สำเร็จภายในเวลา จะรายงานว่า **request was not sent** หากส่งแล้วแต่ไม่ได้รับ response จะรายงานว่า **operation outcome unknown** และไม่ส่งคำสั่งซ้ำอัตโนมัติ ให้ตรวจ `STATUS` ก่อนตัดสินใจส่งคำสั่งใหม่ Server ไม่เก็บ cache ของผลคำสั่ง
 
-ในโหมด `sync` worker ล็อก mutex ของที่นั่งเป้าหมายตามลำดับ seat ID และถือไว้ตลอดช่วงตรวจจนถึงอัปเดต จึงทำ `RESERVE`/`CANCEL` หลายที่นั่งแบบ all-or-nothing เมื่อมีหลาย worker แข่งกันได้; การล็อกเรียงลำดับช่วยเลี่ยง deadlock. `STATUS` ล็อกที่นั่งเดียว และ `LIST` ล็อกครบทั้ง 20 ที่นั่งเพื่ออ่าน snapshot ที่สอดคล้องกัน
+Worker ส่ง response แบบ nonblocking และรอได้สูงสุด 10 วินาทีหาก private queue ของ client นั้นเต็ม คิวตอบกลับของ client อื่นยังแยกกัน แต่ worker ตัวที่กำลังส่งอาจรออยู่ หาก client ถูก kill แบบไม่ผ่านการปิดตามปกติ private queue อาจค้างใน IPC namespace จน container หยุดหรือผู้ดูแลลบด้วย `ipcrm`
 
-ในโหมด `nosync` worker ตรวจทุกที่นั่งก่อนอัปเดต แต่ **ไม่มี mutex รับประกันผลเมื่อหลาย worker ทำพร้อมกัน**: worker อื่นอาจเห็นที่นั่งว่างพร้อมกันและจองทับกันได้ มีการหน่วงสุ่ม 50–500 ms ระหว่างตรวจและอัปเดตเพื่อทำให้ race สังเกตได้ง่ายขึ้น โหมดนี้มีไว้สำหรับการทดลอง ไม่ควรใช้ยืนยันความถูกต้องของการจองจริง
+`ftok("/ipc", 'A')` ใช้สร้าง key ของ shared request queue เท่านั้น ส่วน private reply queue ใช้ `IPC_PRIVATE` และไม่มี key ที่แชร์กัน `/ipc` เป็น path สำหรับ `ftok` และไฟล์ `server.lock` ไม่ใช่ที่เก็บ message; messages อยู่ใน Linux kernel
 
-## โหมดทดลอง
+## ส่วนของโค้ด
 
-สคริปต์เริ่ม container ด้วย server command ต่างกัน โดย client และ queues ยังมี topology เดิม:
-
-| Experiment | คำสั่ง | Server command | จุดที่สังเกต |
-| --- | --- | --- | --- |
-| 1: Sequential baseline | `bash scripts/container.sh start sequential` | `./server sync 1` | มี worker เดียว จึงประมวลผลทีละ request |
-| 2: Concurrent nosync | `bash scripts/container.sh start nosync` | `./server nosync 3` | มีสาม worker และตั้งใจไม่ล็อกเพื่อแสดง race |
-| 3: Concurrent sync | `bash scripts/container.sh start sync` | `./server sync 3` | มีสาม worker พร้อม per-seat mutex |
-
-`scripts/container.sh` ใช้ `nosync` เป็นค่าเริ่มต้น เมื่อต้องการเปลี่ยน experiment ให้ `stop` แล้ว `start` ใหม่เพื่อให้ server และสถานะใน memory เป็นชุดใหม่ ดูคำสั่งรันจริงใน [README](../README.md)
-
-## Logs, load test และหลักฐาน
-
-Server log ในโหมดปกติมี `[SEQ n] [Worker-x] [Client-y]` จึงตามลำดับการรับคำสั่ง, การรอ/ได้ lock และการเข้า/ออก critical section ได้ `AIRPLANE_LOG_MODE=quiet` ลด log ระดับ worker สำหรับ benchmark แต่ไม่เปลี่ยน message flow หรือ reservation logic
-
-`./load_test` เรียก exchange เดียวกับ client และสร้างหนึ่ง thread ต่อหนึ่ง logical client ตามค่า concurrency แต่ละ thread ใช้ client ID เดิมตลอดรอบและส่งคำขอทีละรายการ โดยแบ่ง request numbers ให้แต่ละ thread อย่างแน่นอนเพื่อให้จองและยกเลิกด้วย owner เดิมได้ โปรแกรมสรุป completed, transport failures, operation outcomes, throughput และ average latency. Script `scripts/load-test.ps1` เรียก `docker exec` และเก็บ output, parameters และ server logs เป็น TXT แยกต่อรอบที่ `results/load-tests/`; demo scripts เก็บ output แยกตาม client พร้อม server logs ที่ `results/demos/`. รายชื่อไฟล์ผลลัพธ์ดูได้ใน [`results/README.md`](../results/README.md)
-
-## แผนที่โค้ด
-
-| Path | Responsibility |
+| Path | หน้าที่ |
 | --- | --- |
-| `src/client/` | อ่านคำสั่งจากผู้ใช้และแสดง response |
-| `src/ipc/` | สร้าง/เปิด message queues, ส่งและจับคู่ message, กัน server ซ้ำ |
-| `src/server/` | lifecycle ของ server, worker threads และ dispatch คำสั่ง |
-| `src/reservation/` | seat state, validation, reserve/cancel และ mutex |
-| `src/benchmark/` | concurrent load generator และตัวเลขผลการทดสอบ |
-| `src/utils/` | parser, logger และ random delay |
-| `Dockerfile`, `scripts/container.sh` | image และการเริ่ม/หยุด server container เดียว |
-| `scripts/`, `tests/` | คำสั่ง demo/เก็บผล และชุดทดสอบ |
+| `src/client/` | รับคำสั่งจากผู้ใช้และแสดงผล |
+| `src/ipc/` | สร้าง/ลบ System V queues, ส่ง request และจับคู่ response |
+| `src/server/server.cpp` | เปิด shared request queue, เริ่ม Receiver/Workers และจัดการ shutdown |
+| `src/server/work_queue.h` | คิวงานใน memory ระหว่าง Receiver กับ Workers |
+| `src/server/worker.cpp` | รับ request จาก System V queue, dispatch งาน, execute และตอบเข้าคิวของ client |
+| `src/reservation/` | ที่นั่ง, transaction และ per-seat mutex |
+| `src/benchmark/` | load generator ที่สร้าง logical client threads พร้อม private queues |
+
+ขั้นตอน build, `docker run` และ `docker exec` อ่านต่อที่ [Docker Build and Runtime Flow](docker-runtime-flow.md); คำสั่งรันแต่ละ experiment อยู่ใน [README](../README.md)

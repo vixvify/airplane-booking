@@ -7,6 +7,7 @@ struct RequestMessage {
     long mtype;
     int clientId;
     std::uint64_t requestId;
+    int replyQueueId;
     char command[128];
 };
 

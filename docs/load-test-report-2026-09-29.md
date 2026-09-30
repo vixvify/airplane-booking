@@ -1,5 +1,7 @@
 # รายงานผลการทดสอบ Load Test
 
+> ผลย้อนหลังจากวันที่ 2026-09-29: ชุดทดสอบนี้ยังใช้ shared response queue จึงไม่ควรนำตัวเลขไปอ้างว่าเป็น throughput ของ architecture ปัจจุบันที่ใช้ private reply queues ดูผังปัจจุบันใน [architecture.md](architecture.md)
+
 ## Airplane Reservation System
 
 **วันที่ทดสอบ:** 2026-09-29  

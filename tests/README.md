@@ -12,7 +12,7 @@ On Windows, the root README describes running the project in one Docker containe
 
 | Bug | Regression | Expected result |
 | --- | --- | --- |
-| Shared request/response routing stalls under load | `regression_tests.sh`: 200 concurrent RESERVE requests | All complete without transport failures and sync mode has one winner |
+| IPC routing stalls under load | `ipc_tests.cpp`: private queue isolation; `regression_tests.sh`: 200 concurrent RESERVE requests | Each client gets its own response, all complete without transport failures, and sync mode has one winner |
 | Starting another server destroys the active queue | `regression_tests.sh`: duplicate server; `integration_tests.sh`: crash recovery | Duplicate exits unsuccessfully; original reservation survives; stale queue can be recovered after SIGKILL |
 | Long commands execute a truncated prefix | `regression_tests.sh`: invalid 129-byte and valid 127-byte command | Reject the full invalid input and preserve seat state |
 | Overflow in a seat list accepts a valid prefix | `unit_tests.cpp`, `regression_tests.sh`: RESERVE/CANCEL in both modes | Reject overflow without changing any seat |

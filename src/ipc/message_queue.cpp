@@ -102,13 +102,6 @@ MessageQueue MessageQueue::openRequests() {
     );
 }
 
-MessageQueue MessageQueue::openResponses() {
-    return openQueue(
-        Constants::RESPONSE_QUEUE_PROJECT_ID,
-        "msgget response queue (start the server first)"
-    );
-}
-
 MessageQueue MessageQueue::createRequests() {
     return createQueue(
         Constants::REQUEST_QUEUE_PROJECT_ID,
@@ -116,15 +109,16 @@ MessageQueue MessageQueue::createRequests() {
     );
 }
 
-MessageQueue MessageQueue::createResponses() {
-    return createQueue(
-        Constants::RESPONSE_QUEUE_PROJECT_ID,
-        "create response queue"
-    );
+MessageQueue MessageQueue::createPrivateResponse() {
+    const int id = msgget(IPC_PRIVATE, IPC_CREAT | 0600);
+    if (id == -1) {
+        fail("create private reply queue");
+    }
+    return MessageQueue(id, true);
 }
 
 std::string exchangeCommand(
-    int requestQueueId, int responseQueueId,
+    int requestQueueId, int replyQueueId,
     int clientId, const std::string& command,
     std::chrono::milliseconds timeout,
     InFlightTracker* tracker
@@ -140,11 +134,11 @@ std::string exchangeCommand(
     request.mtype = Constants::REQUEST_TYPE;
     request.clientId = clientId;
     request.requestId = static_cast<std::uint64_t>(responseType);
+    request.replyQueueId = replyQueueId;
 
     std::memcpy(request.command, command.c_str(), command.size() + 1);
 
     const auto deadline = std::chrono::steady_clock::now() + timeout;
-
     while (msgsnd(requestQueueId, &request, sizeof(request) - sizeof(long), IPC_NOWAIT) == -1) {
         if (errno != EAGAIN && errno != EINTR) {
             fail("send request");
@@ -152,17 +146,13 @@ std::string exchangeCommand(
         waitForRetry(deadline, "request queue timeout (request was not sent)");
     }
 
-   
     if (tracker) {
         tracker->onSent();
     }
-    bool sent = (tracker != nullptr);
-
     try {
         ResponseMessage response{};
-
-        ssize_t receivedBytes;
-        while ((receivedBytes = msgrcv(responseQueueId, &response,
+        ssize_t receivedBytes = -1;
+        while ((receivedBytes = msgrcv(replyQueueId, &response,
                                       sizeof(response) - sizeof(long),
                                       responseType, IPC_NOWAIT)) == -1) {
             if (errno != ENOMSG && errno != EINTR) {
@@ -172,24 +162,20 @@ std::string exchangeCommand(
                 "response timeout (operation outcome unknown; check STATUS before retrying)");
         }
 
-        if (sent) {
-            tracker->onReceived();
-            sent = false;
-        }
-
         const size_t headerBytes = offsetof(ResponseMessage, response) - sizeof(long);
         if (receivedBytes <= static_cast<ssize_t>(headerBytes)
             || memchr(response.response, '\0', receivedBytes - headerBytes) == nullptr) {
             throw std::runtime_error("invalid response payload");
         }
-
         if (response.clientId != clientId || response.requestId != request.requestId) {
             throw std::runtime_error("response correlation mismatch");
         }
-
+        if (tracker) {
+            tracker->onReceived();
+        }
         return response.response;
     } catch (...) {
-        if (sent) {
+        if (tracker) {
             tracker->onReceived();
         }
         throw;

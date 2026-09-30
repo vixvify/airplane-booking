@@ -75,15 +75,10 @@ string processCommand(
 
 }
 
-void worker(
-    int workerId,
-    int requestQueueId,
-    int responseQueueId
-) {
+void receiveRequests(int requestQueueId, WorkQueue& workQueue) {
     while (true) {
         RequestMessage request{};
-
-        ssize_t received = msgrcv(
+        const ssize_t received = msgrcv(
             requestQueueId,
             &request,
             sizeof(RequestMessage) - sizeof(long),
@@ -98,17 +93,26 @@ void worker(
             if (errno == EINTR) {
                 continue;
             }
-            perror("msgrcv");
+            perror("msgrcv request");
             continue;
         }
 
         if (received != sizeof(RequestMessage) - sizeof(long)
             || request.clientId <= 0 || request.requestId == 0
             || request.requestId > static_cast<std::uint64_t>(LONG_MAX)
+            || request.replyQueueId < 0
             || std::memchr(request.command, '\0', sizeof(request.command)) == nullptr) {
             continue;
         }
+        if (!workQueue.push(request)) {
+            break;
+        }
+    }
+}
 
+void worker(int workerId, WorkQueue& workQueue) {
+    RequestMessage request{};
+    while (workQueue.pop(request)) {
         string command(request.command);
 
         logMessage(
@@ -117,11 +121,7 @@ void worker(
             "received " + command
         );
 
-        string result = processCommand(
-            workerId,
-            request.clientId,
-            command
-        );
+        const string result = processCommand(workerId, request.clientId, command);
 
         ResponseMessage response{};
         response.mtype = static_cast<long>(request.requestId);
@@ -142,7 +142,7 @@ void worker(
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (
             msgsnd(
-                responseQueueId,
+                request.replyQueueId,
                 &response,
                 responseBytes,
                 IPC_NOWAIT

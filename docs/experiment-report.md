@@ -4,6 +4,8 @@
 
 รายงานนี้สรุปผลการทดลองจากไฟล์หลักฐานจริงใน `results/experiment-study-2026-09-27/` โดยแยก configuration และผลลัพธ์ของแต่ละการทดลองอย่างชัดเจน
 
+> รายงานนี้เป็นผลย้อนหลังจาก source commit ที่ระบุด้านล่าง ซึ่งยังใช้ shared response queue ตัวเลขเหล่านี้ไม่ใช่ผล benchmark ของ architecture ปัจจุบันที่ใช้ private reply queues ดูผังปัจจุบันใน [architecture.md](architecture.md)
+
 > **การอ่านผล:** `REJECTED` ในการทดสอบแย่งจองที่นั่งเดียวกันเป็น expected contention ไม่ใช่ความผิดพลาดของ test script ส่วน `Transport Fail` หมายถึง request หรือ response ไม่เสร็จภายใน timeout จริง
 
 ## 1. Environment และเกณฑ์การทดลอง
