@@ -16,14 +16,10 @@ flowchart TB
         direction LR
         SERVER["SERVER PROCESS<br/>./server &lt;mode&gt; &lt;workers&gt;"]
         WORKERS["WORKER THREADS<br/>Worker 1 .. N"]
-        IPC["SYSTEM V IPC<br/>Request Queue<br/>Response Queue"]
         CLIENTS["CLIENT PROCESSES<br/>./client &lt;id&gt;<br/>started by docker exec"]
         LOAD["LOAD TEST PROCESS<br/>./load_test ...<br/>started by docker exec"]
 
         SERVER --> WORKERS
-        WORKERS <--> IPC
-        CLIENTS <--> IPC
-        LOAD <--> IPC
     end
 
     OUTPUT["TERMINAL OUTPUT<br/>stdout · stderr · docker logs"]
@@ -44,13 +40,12 @@ flowchart TB
     style WORKERS fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px;
     style CLIENTS fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px;
     style LOAD fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px;
-    style IPC fill:#7c2d12,stroke:#fb923c,color:#fff7ed,stroke-width:3px;
     style OUTPUT fill:#164e63,stroke:#22d3ee,color:#ecfeff,stroke-width:3px;
     style RESULTS fill:#164e63,stroke:#22d3ee,color:#ecfeff,stroke-width:3px;
     style CONTAINER fill:#111820,stroke:#64748b,color:#e2e8f0,stroke-width:2px;
 ```
 
-`client` และ `load_test` ไม่ได้รันเป็น container แยก แต่เป็น process ใหม่ภายใน container `airplane-reservation` ผ่าน `docker exec` จึงมองเห็น System V message queues และ IPC namespace เดียวกับ server
+`client` และ `load_test` ไม่ได้รันเป็น container แยก แต่เป็น process ใหม่ภายใน container `airplane-reservation` ผ่าน `docker exec` จึงมองเห็น System V IPC namespace เดียวกับ server ภายใน namespace นี้มี shared request queue และ private reply queues แยกตาม client ดูเส้นทางของ message ใน [System Architecture](architecture.md)
 
 ## 2. Flow เมื่อสั่ง Build image
 
@@ -220,7 +215,7 @@ sequenceDiagram
         Host->>Docker: docker exec -i container ./client ID
         Docker->>Clients: start client process
         Clients->>Server: request via System V request queue
-        Server-->>Clients: response via response queue
+        Server-->>Clients: worker sends response via that client's private reply queue
         Clients-->>Host: stdout/stderr
     end
     Host->>Docker: docker logs --since STARTED_AT

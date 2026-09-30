@@ -1,6 +1,6 @@
 # Airplane Reservation System
 
-ระบบจองที่นั่งเครื่องบิน 20 ที่นั่ง เขียนด้วย C++17 ใช้ System V message queues ระหว่าง client processes กับ server process และใช้ per-seat mutex ในโหมด synchronization ทั้งหมดรันใน **Docker container เดียว**; ไม่ต้องใช้ Docker Compose ดูโครงสร้างได้ที่ [docs/architecture.md](docs/architecture.md)
+ระบบจองที่นั่งเครื่องบิน 20 ที่นั่ง เขียนด้วย C++17 ใช้ shared System V request queue และ private reply queue แยกต่อ client โดย server รับ request แล้วส่งต่อให้ worker threads ใช้ per-seat mutex ในโหมด synchronization ทั้งหมดรันใน **Docker container เดียว**; ไม่ต้องใช้ Docker Compose ดูโครงสร้างได้ที่ [docs/architecture.md](docs/architecture.md)
 
 ## สิ่งที่ต้องมี
 
@@ -244,7 +244,7 @@ PowerShell:
 load-test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
 ```
 
-ถ้าไม่ระบุ `seat_id` โปรแกรมจะวน Seat 1–20 แบบ round-robin ตัวอย่าง `50000 100` หมายถึง logical clients 100 รายส่งรวม 50,000 requests แต่ละ thread ใช้ client ID เดิมตลอดการรัน ไม่ได้สร้าง `./client` หรือ container เพิ่ม
+ถ้าไม่ระบุ `seat_id` โปรแกรมจะวน Seat 1–20 แบบ round-robin ตัวอย่าง `50000 100` หมายถึง logical clients 100 รายส่งรวม 50,000 requests แต่ละ thread ใช้ client ID และ private reply queue ของตัวเองตลอดการรัน ไม่ได้สร้าง `./client` หรือ container เพิ่ม
 
 `Throughput` นับทุก request ที่ได้รับ response ต่อวินาที รวม response แบบ `REJECTED` ด้วย ดังนั้นการยิง `RESERVE 10` ซ้ำ 50,000 ครั้งในโหมด `sync` จะมีผู้จองสำเร็จอย่างมากหนึ่งราย แต่ request ที่ถูกปฏิเสธยังนับเป็น completed requests
 
@@ -304,7 +304,9 @@ docker run -d --rm --name airplane-reservation airplane-reservation:latest ./ser
 
 ## IPC ภายใน container เดียว
 
-Server ใช้ `ftok("/ipc", 'A')` และ `ftok("/ipc", 'B')` สร้าง keys ของ request/response queues ตามลำดับ Dockerfile สร้าง directory `/ipc` ไว้แล้ว ทุก process ใน container เดียวเห็น path และ IPC namespace เดียวกัน จึง **ไม่ต้องใช้ shared volume หรือ `ipc: host`** ข้อความอยู่ใน System V queues ของ Linux kernel ไม่ได้บันทึกเป็นไฟล์ใต้ `/ipc`
+Server ใช้ `ftok("/ipc", 'A')` สร้าง key ของ shared request queue ส่วน client แต่ละ process สร้าง private reply queue ด้วย `IPC_PRIVATE` แล้วส่ง queue ID ไปกับ request Server Receiver ส่งงานต่อเข้า internal work queue และ worker ตอบกลับไปยัง private queue ของ client นั้น Client ลบ queue ของตัวเองเมื่อจบการทำงาน Dockerfile สร้าง directory `/ipc` ไว้แล้ว ทุก process ใน container เดียวเห็น path และ IPC namespace เดียวกัน จึง **ไม่ต้องใช้ shared volume หรือ `ipc: host`** ข้อความอยู่ใน System V queues ของ Linux kernel ไม่ได้บันทึกเป็นไฟล์ใต้ `/ipc`
+
+Client รอคำตอบสูงสุด 10 วินาที ถ้า timeout หลังส่ง request แล้ว จะรายงานว่า `operation outcome unknown` และไม่ส่งคำสั่งซ้ำอัตโนมัติ ให้ตรวจ `STATUS` ก่อนตัดสินใจส่งคำสั่งใหม่ ระบบไม่มี response cache
 
 ## Tests และ CI
 

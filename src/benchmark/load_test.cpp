@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <thread>
@@ -167,10 +168,8 @@ int main(int argc, char* argv[]) {
     }
 
     int requestQueueId;
-    int responseQueueId;
     try {
         requestQueueId = ipc::MessageQueue::openRequests().id();
-        responseQueueId = ipc::MessageQueue::openResponses().id();
     } catch (const exception& error) {
         cerr << error.what() << "\nMake sure server is running.\n";
         return 1;
@@ -190,7 +189,6 @@ int main(int argc, char* argv[]) {
     } else {
         cout << "Target Seat     : round-robin 1-20\n";
     }
-    cout << "Worker Threads  : 3 (Server Parallelism)\n";
     cout << "====================================\n\n";
 
     // In-Flight tracking
@@ -232,6 +230,16 @@ int main(int argc, char* argv[]) {
                 auto& stats = threadStats[i];
                 stats.latenciesUs.reserve(requestsPerClient);
 
+                std::unique_ptr<ipc::MessageQueue> replies;
+                try {
+                    replies = std::make_unique<ipc::MessageQueue>(ipc::MessageQueue::createPrivateResponse());
+                } catch (const exception& error) {
+                    stats.transportErrors = requestsPerClient;
+                    threadsReady.fetch_add(1, memory_order_release);
+                    cerr << "Client " << clientId << ": " << error.what() << "\n";
+                    return;
+                }
+
                 // Wait at the barrier until all threads are created and ready
                 threadsReady.fetch_add(1, memory_order_release);
                 while (!startGate.load(memory_order_acquire)) {
@@ -257,7 +265,7 @@ int main(int argc, char* argv[]) {
                     const auto start = chrono::steady_clock::now();
                     try {
                         const auto response = ipc::exchangeCommand(
-                            requestQueueId, responseQueueId,
+                            requestQueueId, replies->id(),
                             clientId, command,
                             chrono::seconds(10),
                             &inFlightTracker

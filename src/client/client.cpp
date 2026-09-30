@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
 
     try {
         auto requests = ipc::MessageQueue::openRequests();
-        auto responses = ipc::MessageQueue::openResponses();
+        auto responses = ipc::MessageQueue::createPrivateResponse();
         std::cout << std::unitbuf << "Client-" << clientId
                   << " connected. Enter commands (LIST, STATUS, RESERVE, CANCEL, QUIT).\n";
 

@@ -37,7 +37,7 @@ done
 start_server sync 3
 output="$(run_load_test "queue saturation regression" 200 200 RESERVE 10)"
 assert_contains "$output" "Completed       : 200" "saturated request queue must drain"
-assert_contains "$output" "Transport Fail  : 0" "separate request/response queues must prevent deadlock"
+assert_contains "$output" "Transport Fail  : 0" "private reply queues must prevent response routing deadlock"
 assert_contains "$output" "Operation OK    : 1" "sync load still has exactly one winner"
 pass "200 concurrent reservations finish without IPC deadlock"
 
