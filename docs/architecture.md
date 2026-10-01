@@ -6,7 +6,7 @@
 
 ![Runtime architecture: Clients, shared request queue, Receiver, WorkQueue, Workers, and private reply queues](architecture-overview.png)
 
-[เปิดภาพขนาดเต็ม](architecture-overview.png) · [ไฟล์ต้นฉบับสำหรับแก้ผัง](architecture-overview.html)
+[เปิดภาพขนาดเต็ม](architecture-overview.png)
 
 Client แต่ละกล่องทางซ้ายเป็น process เดียวที่ทั้งส่งคำขอและรอคำตอบ เส้นสีส้มรวมคำขอจาก Client ทุกตัวเข้า shared request queue; แนวเส้นที่รวมกันเป็นเพียงทางเดินในภาพ ไม่ใช่คิวหรือ process เพิ่ม ส่วนเส้นสีฟ้าแสดง Worker ส่ง response ตรงเข้าคิวส่วนตัวของ Client เจ้าของ request แล้ว Client รับจากคิวของตน
 
