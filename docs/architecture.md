@@ -10,7 +10,7 @@
 
 Client แต่ละกล่องทางซ้ายเป็น process เดียวที่ทั้งส่งคำขอและรอคำตอบ เส้นสีส้มรวมคำขอจาก Client ทุกตัวเข้า shared request queue; แนวเส้นที่รวมกันเป็นเพียงทางเดินในภาพ ไม่ใช่คิวหรือ process เพิ่ม ส่วนเส้นสีฟ้าแสดง Worker ส่ง response ตรงเข้าคิวส่วนตัวของ Client เจ้าของ request แล้ว Client รับจากคิวของตน
 
-Worker 1, 2 และ M คือ threads ใน server process เดียวกัน (`M` = จำนวน worker ที่ตั้งค่า; โหมด sequential มีเฉพาะ Worker 1) กล่อง **WORKER THREADS** ด้านบนเป็นแค่หัวกลุ่ม ไม่ใช่ thread หรือ dispatcher เพิ่มเติม ทุกตัวหยิบงานจาก internal work queue ประมวลผลกับ `seats[20]` ชุดเดียวกัน และส่ง `ResponseMessage` **เองโดยตรง** ไปยัง `replyQueueId` ของ request นั้น
+Worker 1, 2 และ M คือ threads ใน server process เดียวกัน (`M` = จำนวน worker ที่ตั้งค่า; โหมด sequential มีเฉพาะ Worker 1) เส้นสีม่วงจาก internal work queue เชื่อมไปยัง worker ทุกตัว เพราะแต่ละตัวดึงงานจากคิวเดียวกันเอง ไม่มี worker ตัวกลางหรือ dispatcher เพิ่มเติม ทุกตัวประมวลผลกับ `seats[20]` ชุดเดียวกัน และส่ง `ResponseMessage` **เองโดยตรง** ไปยัง `replyQueueId` ของ request นั้น
 
 เส้น Worker 1 → Queue 1, Worker 2 → Queue 2 และ Worker M → Queue N เป็นเพียง **ตัวอย่างของสาม request** เพื่อให้ภาพอ่านง่าย ไม่ใช่การจับคู่ถาวร Worker ตัวใดก็ส่งไปยัง private queue ของ client ตัวใดได้ตาม `replyQueueId`; หนึ่ง response ส่งเข้าคิวเดียว ไม่ได้กระจายไปทุกคิว
 
