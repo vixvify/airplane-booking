@@ -4,45 +4,15 @@
 
 ## ภาพรวมระบบ: จากคำขอถึงคำตอบ
 
-```mermaid
-%%{init: {"theme": "base", "flowchart": {"curve": "linear", "nodeSpacing": 55, "rankSpacing": 55}, "themeVariables": {"background": "#111827", "primaryTextColor": "#f8fafc", "lineColor": "#94a3b8", "fontFamily": "Arial"}}}%%
-flowchart LR
-    SEND["CLIENTS 1 .. N · SEND<br/>สร้าง private queue และ requestId<br/>แนบ replyQueueId ใน request"]
-    REQUEST[("SHARED REQUEST QUEUE<br/>System V · mtype = 1")]
-    RECEIVER["SERVER RECEIVER<br/>thread เดียว · msgrcv<br/>ตรวจรูปแบบ request"]
-    WORK_QUEUE["INTERNAL WORK QUEUE<br/>deque · mutex · condition variable<br/>สูงสุด 1024 งาน"]
-    WORKERS["WORKER POOL 1 .. N<br/>parse / execute · seats[20]<br/>sync: per-seat mutexes[20]<br/>ส่งตรงตาม replyQueueId"]
-    Q1[("PRIVATE REPLY QUEUE 1<br/>System V · IPC_PRIVATE")]
-    Q2[("PRIVATE REPLY QUEUE 2<br/>System V · IPC_PRIVATE")]
-    QN[("PRIVATE REPLY QUEUE N<br/>System V · IPC_PRIVATE")]
-    C1["CLIENT 1 · RECEIVE<br/>msgrcv(requestId)"]
-    C2["CLIENT 2 · RECEIVE<br/>msgrcv(requestId)"]
-    CN["CLIENT N · RECEIVE<br/>msgrcv(requestId)"]
+![Runtime architecture: Clients, shared request queue, Receiver, WorkQueue, Workers, and private reply queues](architecture-overview.png)
 
-    SEND -->|"msgsnd RequestMessage"| REQUEST
-    REQUEST -->|msgrcv| RECEIVER
-    RECEIVER -->|dispatch| WORK_QUEUE
-    WORK_QUEUE -->|pop| WORKERS
-    WORKERS -->|"msgsnd ResponseMessage"| Q1
-    WORKERS --> Q2
-    WORKERS --> QN
-    Q1 --> C1
-    Q2 --> C2
-    QN --> CN
+[เปิดภาพขนาดเต็ม](architecture-overview.png) · [ไฟล์ต้นฉบับสำหรับแก้ผัง](architecture-overview.html)
 
-    classDef server fill:#4c1d95,stroke:#a78bfa,color:#faf5ff,stroke-width:3px
-    classDef request fill:#78350f,stroke:#f59e0b,color:#fffbeb,stroke-width:3px
-    classDef internal fill:#374151,stroke:#d1d5db,color:#f9fafb,stroke-width:3px
-    classDef reply fill:#0c4a6e,stroke:#38bdf8,color:#f0f9ff,stroke-width:3px
-    classDef client fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
-    class RECEIVER,WORKERS server
-    class REQUEST request
-    class WORK_QUEUE internal
-    class Q1,Q2,QN reply
-    class SEND,C1,C2,CN client
-```
+Client แต่ละกล่องทางซ้ายเป็น process เดียวที่ทั้งส่งคำขอและรอคำตอบ เส้นสีส้มรวมคำขอจาก Client ทุกตัวเข้า shared request queue; แนวเส้นที่รวมกันเป็นเพียงทางเดินในภาพ ไม่ใช่คิวหรือ process เพิ่ม ส่วนเส้นสีฟ้าแสดง Worker ส่ง response ตรงเข้าคิวส่วนตัวของ Client เจ้าของ request แล้ว Client รับจากคิวของตน
 
-กล่อง **SEND** และ **RECEIVE** คือคนละช่วงของ client process เดียวกัน ไม่ใช่ client สองชุด Client 1, 2 และ N ส่งคำขอผ่าน shared request queue เดียว แต่แต่ละตัวสร้าง private reply queue ของตนเอง เมื่อ Worker ทำงานเสร็จจะเลือก **เพียงคิวเดียว** จาก `replyQueueId` ใน request แล้วส่งคำตอบตรงเข้าคิวนั้น เส้นจาก Worker ไป Queue 1, 2 และ N จึงแสดงทางเลือก ไม่ใช่การส่งคำตอบเดียวไปทุกคิว
+Worker 1, 2 และ M คือ threads ใน server process เดียวกัน (`M` = จำนวน worker ที่ตั้งค่า; โหมด sequential มีเฉพาะ Worker 1) กล่อง **WORKER THREADS** ด้านบนเป็นแค่หัวกลุ่ม ไม่ใช่ thread หรือ dispatcher เพิ่มเติม ทุกตัวหยิบงานจาก internal work queue ประมวลผลกับ `seats[20]` ชุดเดียวกัน และส่ง `ResponseMessage` **เองโดยตรง** ไปยัง `replyQueueId` ของ request นั้น
+
+เส้น Worker 1 → Queue 1, Worker 2 → Queue 2 และ Worker M → Queue N เป็นเพียง **ตัวอย่างของสาม request** เพื่อให้ภาพอ่านง่าย ไม่ใช่การจับคู่ถาวร Worker ตัวใดก็ส่งไปยัง private queue ของ client ตัวใดได้ตาม `replyQueueId`; หนึ่ง response ส่งเข้าคิวเดียว ไม่ได้กระจายไปทุกคิว
 
 Server Receiver เป็น thread เดียวที่อ่าน shared request queue แล้วส่งงานต่อให้ worker ผ่านคิวใน memory เมื่อคิวงานเต็ม Receiver จะรอให้ worker ดึงงานออกก่อน การรอ/ปลุกใช้ `std::condition_variable` ใน server process หนึ่ง client process สร้าง private queue หนึ่งชุดตอนเริ่มทำงานและลบเมื่อจบ process ส่วน `load_test` สร้างหนึ่ง private queue ต่อ logical client thread
 
