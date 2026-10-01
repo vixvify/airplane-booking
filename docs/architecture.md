@@ -11,7 +11,9 @@ flowchart LR
     REQUEST[("SHARED REQUEST QUEUE<br/>System V · mtype = 1")]
     RECEIVER["SERVER RECEIVER<br/>thread เดียว · msgrcv<br/>ตรวจรูปแบบ request"]
     WORK_QUEUE["INTERNAL WORK QUEUE<br/>deque · mutex · condition variable<br/>สูงสุด 1024 งาน"]
-    WORKERS["WORKER POOL 1 .. N<br/>parse / execute · seats[20]<br/>sync: per-seat mutexes[20]<br/>ส่งตรงตาม replyQueueId"]
+    W1["WORKER 1<br/>pop · parse · execute<br/>msgsnd(replyQueueId)"]
+    W2["WORKER 2<br/>pop · parse · execute<br/>msgsnd(replyQueueId)"]
+    WM["WORKER M<br/>pop · parse · execute<br/>msgsnd(replyQueueId)"]
     Q1[("PRIVATE REPLY QUEUE 1<br/>System V · IPC_PRIVATE")]
     Q2[("PRIVATE REPLY QUEUE 2<br/>System V · IPC_PRIVATE")]
     QN[("PRIVATE REPLY QUEUE N<br/>System V · IPC_PRIVATE")]
@@ -22,10 +24,12 @@ flowchart LR
     SEND -->|"msgsnd RequestMessage"| REQUEST
     REQUEST -->|msgrcv| RECEIVER
     RECEIVER -->|dispatch| WORK_QUEUE
-    WORK_QUEUE -->|pop| WORKERS
-    WORKERS -->|"msgsnd ResponseMessage"| Q1
-    WORKERS --> Q2
-    WORKERS --> QN
+    WORK_QUEUE --> W1
+    WORK_QUEUE --> W2
+    WORK_QUEUE --> WM
+    W1 -->|"ตัวอย่าง request A"| Q1
+    W2 -->|"ตัวอย่าง request B"| Q2
+    WM -->|"ตัวอย่าง request C"| QN
     Q1 --> C1
     Q2 --> C2
     QN --> CN
@@ -35,14 +39,16 @@ flowchart LR
     classDef internal fill:#374151,stroke:#d1d5db,color:#f9fafb,stroke-width:3px
     classDef reply fill:#0c4a6e,stroke:#38bdf8,color:#f0f9ff,stroke-width:3px
     classDef client fill:#064e3b,stroke:#34d399,color:#ecfdf5,stroke-width:3px
-    class RECEIVER,WORKERS server
+    class RECEIVER,W1,W2,WM server
     class REQUEST request
     class WORK_QUEUE internal
     class Q1,Q2,QN reply
     class SEND,C1,C2,CN client
 ```
 
-กล่อง **SEND** และ **RECEIVE** คือคนละช่วงของ client process เดียวกัน ไม่ใช่ client สองชุด Client 1, 2 และ N ส่งคำขอผ่าน shared request queue เดียว แต่แต่ละตัวสร้าง private reply queue ของตนเอง เมื่อ Worker ทำงานเสร็จจะเลือก **เพียงคิวเดียว** จาก `replyQueueId` ใน request แล้วส่งคำตอบตรงเข้าคิวนั้น เส้นจาก Worker ไป Queue 1, 2 และ N จึงแสดงทางเลือก ไม่ใช่การส่งคำตอบเดียวไปทุกคิว
+กล่อง **SEND** และ **RECEIVE** คือคนละช่วงของ client process เดียวกัน ไม่ใช่ client สองชุด Client 1, 2 และ N ส่งคำขอผ่าน shared request queue เดียว แต่แต่ละตัวสร้าง private reply queue ของตนเอง ส่วน Worker 1, 2 และ M คือ threads ใน server process เดียวกัน (`M` = จำนวน worker ที่ตั้งค่า; โหมด sequential มีเฉพาะ Worker 1) ทุกตัวหยิบงานจาก internal work queue ประมวลผลกับ `seats[20]` ชุดเดียวกัน และส่ง `ResponseMessage` **เองโดยตรง** ไปยัง `replyQueueId` ของ request นั้น
+
+เส้น Worker 1 → Queue 1, Worker 2 → Queue 2 และ Worker M → Queue N เป็นเพียง **ตัวอย่างของสาม request** เพื่อให้ภาพอ่านง่าย ไม่ใช่การจับคู่ถาวร Worker ตัวใดก็ส่งไปยัง private queue ของ client ตัวใดได้ตาม `replyQueueId`; หนึ่ง response ส่งเข้าคิวเดียว ไม่ได้กระจายไปทุกคิว
 
 Server Receiver เป็น thread เดียวที่อ่าน shared request queue แล้วส่งงานต่อให้ worker ผ่านคิวใน memory เมื่อคิวงานเต็ม Receiver จะรอให้ worker ดึงงานออกก่อน การรอ/ปลุกใช้ `std::condition_variable` ใน server process หนึ่ง client process สร้าง private queue หนึ่งชุดตอนเริ่มทำงานและลบเมื่อจบ process ส่วน `load_test` สร้างหนึ่ง private queue ต่อ logical client thread
 
