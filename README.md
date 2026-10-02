@@ -226,7 +226,7 @@ Git Bash/Linux:
 
 ```bash
 bash scripts/container.sh stop
-AIRPLANE_LOG_MODE=quiet bash scripts/container.sh start sync 3
+AIRPLANE_LOG_MODE=quiet AIRPLANE_RACE_DELAY=off bash scripts/container.sh start sync 3
 bash scripts/load-test.sh 50000 100 RESERVE 10
 ```
 
@@ -234,7 +234,7 @@ PowerShell:
 
 ```powershell
 & $gitBash -lc "bash scripts/container.sh stop"
-& $gitBash -lc "AIRPLANE_LOG_MODE=quiet bash scripts/container.sh start sync 3"
+& $gitBash -lc "AIRPLANE_LOG_MODE=quiet AIRPLANE_RACE_DELAY=off bash scripts/container.sh start sync 3"
 .\scripts\load-test.ps1 50000 100 RESERVE 10
 ```
 
@@ -248,7 +248,7 @@ load-test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
 
 `Throughput` นับทุก request ที่ได้รับ response ต่อวินาที รวม response แบบ `REJECTED` ด้วย ดังนั้นการยิง `RESERVE 10` ซ้ำ 50,000 ครั้งในโหมด `sync` จะมีผู้จองสำเร็จอย่างมากหนึ่งราย แต่ request ที่ถูกปฏิเสธยังนับเป็น completed requests
 
-`quiet` ลด overhead จากการพิมพ์ server logs แต่ไม่ปิด random delay 50–500 ms ของ transaction ที่สำเร็จ ค่าเฉลี่ย latency จากการยิง `RESERVE 10` ซ้ำจำนวนมากจึงมักได้รับอิทธิพลจาก request ที่ถูกปฏิเสธอย่างรวดเร็ว ไม่ใช่เฉพาะเวลาของการจองที่สำเร็จ
+Load Test ปิด random race delay 50–500 ms เพื่อวัด throughput/latency ของระบบโดยไม่รวมเวลาหน่วงเพื่อสาธิต race condition; TUI ตั้งค่านี้ให้อัตโนมัติ ส่วนการรันแบบ manual ต้องเริ่ม server ด้วย `AIRPLANE_RACE_DELAY=off` ตามตัวอย่างด้านบน หาก server ที่เปิดอยู่ยังเปิด delay สคริปต์ Load Test จะแจ้งให้เริ่ม server ใหม่ การทดลองและ Demo ยังคงเปิด delay ตามเดิม
 
 ผล Load Test อยู่ที่ `results/load-tests/<เวลา UTC>/` และมี `report.txt`, `output.log`, `server.log`, `seat-map.txt` และ `summary.txt`
 

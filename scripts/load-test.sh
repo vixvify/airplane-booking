@@ -26,14 +26,19 @@ fi
 RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
+init_runtime
+if [ "$(container delay)" != off ]; then
+  echo "Load Test requires AIRPLANE_RACE_DELAY=off on the running server. Restart it with: AIRPLANE_RACE_DELAY=off bash scripts/container.sh start <experiment> <workers>" >&2
+  exit 1
+fi
 RUN_DIR="$(create_result_dir load-tests "")"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
-init_runtime
 
 ui_banner "AIRPLANE RESERVATION - LOAD TEST"
 ui_section "CONFIGURATION"
 ui_kv "Experiment" "$EXPERIMENT"
 ui_kv "Workers" "${WORKER_COUNT:-unknown}"
+ui_kv "Race delay" "off"
 ui_kv "Total requests" "$TOTAL_REQUESTS"
 ui_kv "Concurrency" "$CONCURRENCY"
 ui_kv "Operation" "$OPERATION"
@@ -84,6 +89,7 @@ CONFIGURATION
 -------------
 Experiment: $EXPERIMENT
 Workers: ${WORKER_COUNT:-unknown}
+Race delay: off
 Total requests: $TOTAL_REQUESTS
 Concurrency: $CONCURRENCY
 Operation: $OPERATION
@@ -121,6 +127,7 @@ started_at=$STARTED_AT
 finished_at=$(date -u +%FT%TZ)
 experiment=$EXPERIMENT
 workers=${WORKER_COUNT:-unknown}
+race_delay=off
 container_name=${AIRPLANE_CONTAINER_NAME:-airplane-reservation}
 total_requests=$TOTAL_REQUESTS
 concurrency=$CONCURRENCY

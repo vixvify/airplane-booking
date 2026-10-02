@@ -33,6 +33,8 @@ grep -q '^build -t airplane-reservation:latest ' "$MOCK_TRACE" ||
   fail "Docker image build did not preserve arguments"
 grep -q -- 'airplane-reservation:latest ./server sync 3' "$MOCK_TRACE" ||
   fail "Docker run did not select the synchronized experiment"
+grep -q -- 'AIRPLANE_RACE_DELAY=on' "$MOCK_TRACE" ||
+  fail "ordinary server start did not keep the race delay enabled"
 if grep -q '^compose ' "$MOCK_TRACE"; then
   fail "obsolete Compose command was called"
 fi
@@ -56,6 +58,14 @@ grep -q 'Unknown experiment' "$TEST_DIR/invalid-experiment.log" ||
   fail "unknown experiment error was unclear"
 echo "[PASS] unknown experiment is rejected"
 
+if AIRPLANE_RACE_DELAY=invalid bash "$ROOT_DIR/scripts/container.sh" start sync \
+  >"$TEST_DIR/invalid-delay.log" 2>&1; then
+  fail "invalid race delay setting was accepted"
+fi
+grep -q 'AIRPLANE_RACE_DELAY must be on or off' "$TEST_DIR/invalid-delay.log" ||
+  fail "invalid race delay error was unclear"
+echo "[PASS] invalid race delay setting is rejected"
+
 bash "$ROOT_DIR/scripts/container.sh" start sync 5 >/dev/null
 bash "$ROOT_DIR/scripts/container.sh" start nosync 64 >/dev/null
 grep -q -- 'airplane-reservation:latest ./server sync 5' "$MOCK_TRACE" ||
@@ -68,6 +78,18 @@ for args in 'sync 0' 'sync 65' 'sync abc' 'sequential 5'; do
   fi
 done
 echo "[PASS] custom worker counts are validated and passed to Docker"
+
+menu_load_trace="$TEST_DIR/menu-load-docker-calls.log"
+MOCK_TRACE="$menu_load_trace" MENU_LIBRARY_ONLY=yes \
+  bash -c 'source "$1/scripts/menu.sh"; prepare_server sync 3 quiet no off' _ "$ROOT_DIR" >/dev/null
+grep -q '^run .*AIRPLANE_RACE_DELAY=off.*airplane-reservation:latest ./server sync 3$' "$menu_load_trace" ||
+  fail "TUI Load Test did not disable race delay on the server"
+menu_demo_trace="$TEST_DIR/menu-demo-docker-calls.log"
+MOCK_TRACE="$menu_demo_trace" MENU_LIBRARY_ONLY=yes \
+  bash -c 'source "$1/scripts/menu.sh"; prepare_server sync 3 verbose no' _ "$ROOT_DIR" >/dev/null
+grep -q '^run .*AIRPLANE_RACE_DELAY=on.*airplane-reservation:latest ./server sync 3$' "$menu_demo_trace" ||
+  fail "Experiment/Demo server did not retain race delay"
+echo "[PASS] TUI disables race delay only for Load Test"
 
 for configuration in \
   'sync 1 sequential 1' \
@@ -83,6 +105,12 @@ done
 export MOCK_SERVER_COMMAND='["./server","sync","5"]'
 echo "[PASS] running server configuration accepts arbitrary worker counts"
 
+if bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS >"$TEST_DIR/load-delay-on.log" 2>&1; then
+  fail "Load Test accepted a server with race delay enabled"
+fi
+grep -q 'requires AIRPLANE_RACE_DELAY=off' "$TEST_DIR/load-delay-on.log" ||
+  fail "Load Test did not explain the race delay configuration"
+export MOCK_RACE_DELAY=off
 load_output="$(bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS)"
 [[ "$load_output" == *"Load test finished. Results:"* ]] ||
   fail "Bash load-test wrapper did not complete"
@@ -93,6 +121,8 @@ grep -q '^total_requests=1000$' "$load_summary" ||
   fail "Bash load-test summary is missing total requests"
 grep -q '^concurrency=20$' "$load_summary" ||
   fail "Bash load-test summary is missing concurrency"
+grep -q '^race_delay=off$' "$load_summary" ||
+  fail "Bash load-test summary is missing race delay configuration"
 [ -f "$load_report" ] || fail "Bash load-test report was not saved"
 for section in CONFIGURATION RESULTS ARTIFACTS; do
   grep -qx "$section" "$load_report" || fail "Load-test report is missing $section section"
@@ -194,4 +224,4 @@ grep -Fqx 'Client 1 commands: LIST → RESERVE 1 2 → STATUS 1 → CANCEL 1 →
 grep -Fqx 'Client 5 commands: LIST → RESERVE 9 10 → CANCEL 9 → STATUS 10 → QUIT' "$demo_report" ||
   fail "Demo 1 report did not record Client 5's command sequence"
 echo "[PASS] Demo 1 report includes reservation and cancellation totals"
-echo "Script tests: 19 passed, 0 failed (mock Docker transport)"
+echo "Script tests passed (mock Docker transport)"

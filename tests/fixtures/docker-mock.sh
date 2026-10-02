@@ -22,6 +22,7 @@ case "$command" in
             echo '["./server","sync","3"]'
           fi
           ;;
+        *'.Config.Env'*) echo "AIRPLANE_RACE_DELAY=${MOCK_RACE_DELAY:-on}" ;;
         *'org.airplane-reservation.managed'*) echo true ;;
         *) echo "Unexpected inspect format: $format" >&2; exit 45 ;;
       esac

@@ -161,14 +161,15 @@ cycle_value() {
 }
 
 prepare_server() {
-  local experiment="$1" workers="$2" log_mode="$3" rebuild="$4"
+  local experiment="$1" workers="$2" log_mode="$3" rebuild="$4" race_delay="${5:-on}"
   if [ "$rebuild" = yes ]; then
     bash "$CONTAINER_SCRIPT" build || return 1
   fi
   if bash "$CONTAINER_SCRIPT" status >/dev/null 2>&1; then
     bash "$CONTAINER_SCRIPT" stop || return 1
   fi
-  AIRPLANE_LOG_MODE="$log_mode" bash "$CONTAINER_SCRIPT" start "$experiment" "$workers"
+  AIRPLANE_LOG_MODE="$log_mode" AIRPLANE_RACE_DELAY="$race_delay" \
+    bash "$CONTAINER_SCRIPT" start "$experiment" "$workers"
 }
 
 run_task() {
@@ -213,7 +214,7 @@ run_load() {
   echo "Starting load test..."
   echo "============================================================"
   echo
-  if prepare_server "$experiment" "$workers" "$log_mode" "$rebuild"; then
+  if prepare_server "$experiment" "$workers" "$log_mode" "$rebuild" off; then
     if [ "$seat_mode" = round-robin ]; then
       bash "$ROOT_DIR/scripts/load-test.sh" "$requests" "$concurrency" "$operation"
     else
@@ -315,6 +316,7 @@ load_form() {
         option "$index" "${labels[index]}: ${values[index]}"
       fi
     done
+    row "Race delay: off (Load Test only)"
     line
     row "Arrow keys: navigate/change | Enter: edit/run | Esc: back | Q: quit"
     line

@@ -56,6 +56,7 @@ $failure = $null
 $detectedExperiment = "unknown"
 $detectedWorkerCount = "unknown"
 $detectedLogMode = "unknown"
+$detectedRaceDelay = "unknown"
 $docker = $null
 
 try {
@@ -98,6 +99,18 @@ try {
             "verbose"
         }
         Write-Host "Detected server logging: $detectedLogMode"
+        $raceDelayEntry = @($serverDetails[0].Config.Env) |
+            Where-Object { $_ -like "AIRPLANE_RACE_DELAY=*" } |
+            Select-Object -Last 1
+        $detectedRaceDelay = if ($raceDelayEntry) {
+            $raceDelayEntry.Substring("AIRPLANE_RACE_DELAY=".Length)
+        } else {
+            "on"
+        }
+        if ($detectedRaceDelay -ne "off") {
+            throw "Load Test requires AIRPLANE_RACE_DELAY=off on the running server. Restart it with that setting before testing."
+        }
+        Write-Host "Detected race delay: off"
 
         $arguments = @(
             "exec", $ContainerName, "./load_test",
@@ -150,6 +163,7 @@ finally {
         "experiment=$detectedExperiment"
         "workers=$detectedWorkerCount"
         "log_mode=$detectedLogMode"
+        "race_delay=$detectedRaceDelay"
         "container_name=$ContainerName"
         "total_requests=$TotalRequests"
         "concurrency=$Concurrency"
