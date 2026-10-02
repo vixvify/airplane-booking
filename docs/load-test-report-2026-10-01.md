@@ -12,6 +12,8 @@
 
 ### Environment
 
+คอลัมน์ **Configuration** คือรายการสภาพแวดล้อมที่บันทึกไว้ ส่วน **Value** คือค่าที่ใช้ขณะทดลอง เช่น เวอร์ชัน compiler หรือทรัพยากรเครื่อง ตารางนี้อธิบายเงื่อนไขการทดลอง ไม่ใช่ผลการวัดประสิทธิภาพ
+
 | Configuration | Value |
 | --- | --- |
 | Source commit | `d6dab3528f354159668039bc5d011c14ca7de717` |
@@ -25,6 +27,8 @@
 **หลักฐาน:** `docs/evidence/2026-10-01/environment.json`
 
 ### Test Configuration (คงที่ทุก level)
+
+คอลัมน์ **Configuration** คือชื่อการตั้งค่าการทดสอบ ส่วน **Value** คือค่าที่กำหนดเหมือนกันทุกระดับ clients จึงใช้ดูว่าปัจจัยใดถูกควบคุมไว้ขณะเพิ่มโหลด
 
 | Configuration | Value |
 | --- | --- |
@@ -42,19 +46,42 @@
 | Pass criteria | Completed 100%, Transport Fail 0, Timeouts 0, exit code 0 |
 | Repetitions | 3 fresh-container runs ต่อ client level |
 
-### ความหมายของ metrics
+### คำอธิบายคอลัมน์ตารางผลรายรอบ
 
-| Metric | ความหมาย | วิธีคำนวณ |
+คำอธิบายนี้ใช้กับตาราง **ผลรายรอบ** ของทุกระดับตั้งแต่ 20 ถึง 2,000 clients ค่าในแถว Run 1–3 เป็นผลของแต่ละรอบ ไม่ใช่ผลรวมสามรอบ หน่วย `req/s` หมายถึงคำขอต่อวินาที และ `ms` คือมิลลิวินาที โดย 1,000 ms = 1 วินาที
+
+| คอลัมน์ | หมายถึงอะไร | วิธีอ่านและหน่วย |
 | --- | --- | --- |
-| Throughput | Completed requests หารด้วย Total Time | รวม business reject |
-| Avg Latency | เวลาเฉลี่ยต่อ request | คำนวณเฉพาะ requests ที่ได้ response |
-| p95 Latency | Latency ที่ 95th percentile | ไม่รวม timeout |
-| p99 Latency | Latency ที่ 99th percentile | ไม่รวม timeout |
-| Max Latency | Latency สูงสุดในรอบ | ไม่รวม timeout |
-| Operation OK | Requests ที่ server ตอบ business success | RESERVE หรือ CANCEL สำเร็จ |
-| Business Reject | Requests ที่ server ปฏิเสธตาม business logic | seat ถูกจองหรือยังว่าง |
-| Timeout | Requests ที่ไม่ได้รับ response ภายใน 10 วินาที | รวม send + receive |
-| Transport Error | ส่งหรือรับ message ล้มเหลวในระดับ IPC | แยกจาก timeout |
+| Run | ลำดับรอบที่ทดลองด้วยจำนวน clients เท่ากัน | รอบ 1, 2 และ 3 เริ่ม server ใหม่แยกกัน ไม่ใช่ช่วงต่อเนื่องของการรันเดียว |
+| Throughput (req/s) | จำนวนคำขอที่ได้รับคำตอบต่อวินาที | `Completed ÷ Total Time` รวมทั้งคำสั่งที่สำเร็จและถูกปฏิเสธ ค่าสูงแปลว่าตอบคำขอได้มากต่อวินาที ไม่ใช่จองสำเร็จมากเท่านั้น |
+| Avg Latency (ms) | เวลารอคำตอบเฉลี่ยของคำขอในรอบนั้น | นับตั้งแต่ก่อนส่งจนได้รับ matching response รวมเวลารอคิว คำนวณเฉพาะคำขอที่ได้รับคำตอบ ค่าต่ำแปลว่ารอโดยเฉลี่ยสั้นลง |
+| p95 (ms) | เวลารอคำตอบที่ percentile 95 | ประมาณ 95% ของคำขอที่ได้รับคำตอบใช้เวลาไม่เกินค่านี้ เช่น p95 = 200 ms แปลว่าประมาณ 5% รอนานกว่า 200 ms ไม่ใช่ค่าเฉลี่ย |
+| p99 (ms) | เวลารอคำตอบที่ percentile 99 | ประมาณ 99% ของคำขอที่ได้รับคำตอบใช้เวลาไม่เกินค่านี้ ใช้ดูคำขอที่ช้ากว่าคำขอส่วนใหญ่ |
+| Max (ms) | เวลารอคำตอบสูงสุดที่วัดได้ในรอบ | เป็นค่าสูงสุดเฉพาะคำขอที่ได้รับคำตอบ ไม่รวม requests ที่ timeout จึงอาจต่ำกว่า 10,000 ms แม้มี timeout เกิดขึ้น |
+| Completed | จำนวนคำขอที่ได้รับคำตอบเรียบร้อย | หน่วยเป็นคำขอ รวมทั้ง business success และ business rejection ไม่ได้หมายความว่าจองสำเร็จทั้งหมด |
+| Transport Fail | จำนวนคำขอที่จบด้วย timeout หรือข้อผิดพลาดในการ exchange | หน่วยเป็นคำขอ คำนวณ `Timeout + Transport Errors` ดังนั้น Timeout เป็นส่วนหนึ่งของค่านี้ ห้ามนำสองคอลัมน์มาบวกซ้ำ |
+| Timeout | จำนวนคำขอที่หมดเวลาระหว่างส่งหรือรอรับคำตอบ | หน่วยเป็นคำขอ ใช้กำหนดเวลา 10 วินาทีร่วมกันสำหรับส่งและรับ อาจส่งไม่สำเร็จหรือส่งแล้วแต่รับไม่ทัน ตัวนับนี้ไม่แยกสองกรณี |
+| สถานะ | ผลการตรวจว่ารอบนั้นผ่านเกณฑ์หรือไม่ | `PASS` คือได้รับคำตอบครบและไม่มี transport failure; `PARTIAL` คือได้รับคำตอบเพียงบางส่วน ซึ่งถือว่าไม่ผ่านเกณฑ์ PASS |
+
+**การอ่านแถวสรุป:** Throughput และ Avg Latency เป็นค่าเฉลี่ยเลขคณิตของสามรอบ รวมรอบที่มี timeout ด้วย Completed จะแสดงจำนวนต่อรอบเมื่อทั้งสามรอบมีค่าเท่ากัน ส่วน Transport Fail/Timeout ที่ระบุว่า “รวม” เป็นผลรวมสามรอบ ค่า `—` หมายถึงไม่ได้สรุปค่านั้น ไม่ใช่ศูนย์ และไม่ใช่ผล percentile จากการรวม requests ทั้งสามรอบ `PASS 3/3` หมายถึงผ่านสามรอบ ส่วน `PARTIAL 3/3` หมายถึงทั้งสามรอบตอบไม่ครบ หรือผ่าน 0/3 รอบ
+
+**ตัวอย่างอ่านข้อมูล:** ที่ 2,000 clients รอบ 1 วางแผนไว้ 200,000 คำขอ ได้คำตอบ 199,982 คำขอ และ timeout 18 คำขอ จึงมี `Transport Fail = 18` เช่นกัน ไม่ใช่เสียไป 36 คำขอ ส่วน Avg Latency 640.30 ms เป็นค่าเฉลี่ยของ 199,982 คำขอที่ได้คำตอบเท่านั้น
+
+### คำเพิ่มเติมที่ปรากฏใน log
+
+- **Logical Clients:** จำนวน clients จำลองที่สร้างขึ้น แต่ละรายใช้หนึ่ง OS thread ไม่ใช่จำนวน workers ของ server
+- **Requests/Client:** จำนวนคำขอที่แต่ละ client ต้องส่ง ในชุดนี้คือ 100 คำขอ
+- **Planned Requests:** จำนวนคำขอที่วางแผนไว้ต่อรอบ เท่ากับ clients × 100
+- **Operation OK / Succeeded:** จำนวนคำสั่ง RESERVE หรือ CANCEL ที่ตอบว่าสำเร็จ นับคำสั่ง ไม่ใช่จำนวน clients หรือจำนวนคู่การจอง/ยกเลิก
+- **Business Reject / Operation Fail:** จำนวนคำสั่งที่ได้รับคำตอบปฏิเสธ เช่น จองที่นั่งที่ไม่ว่าง หรือยกเลิกที่นั่งที่ตนไม่ได้เป็นเจ้าของ ค่านี้ยังนับอยู่ใน Completed
+- **Transport Errors:** ข้อผิดพลาดในการส่ง/รับหรือตรวจคำตอบที่ไม่ใช่ timeout เช่น queue ถูกลบ ไม่ใช่ตัวเดียวกับ Transport Fail ซึ่งรวม timeout ด้วย
+- **Skipped Requests:** คำขอที่วางแผนไว้แต่ไม่มีผล completed หรือ transport failure เช่น สร้าง client threads ได้ไม่ครบ ในชุดนี้เป็นศูนย์ทุกครั้ง
+- **Completion Rate:** `Completed ÷ Planned Requests × 100` เป็นเปอร์เซ็นต์คำขอที่ได้รับคำตอบ ไม่ใช่อัตราจองสำเร็จ
+- **Total Time:** เวลาตั้งแต่ปล่อย start gate ให้ clients เริ่มส่งคำขอจน client threads จบ หน่วยวินาที ไม่รวมการสร้าง threads/private queues ก่อนเปิด gate
+- **Peak In-Flight:** จำนวน exchanges ที่ส่งคำขอเข้าคิวสำเร็จแล้วและยังไม่จบด้วย response หรือ exception สูงสุดที่พบ หน่วยเป็นคำขอ ไม่ใช่จำนวนงานที่ workers กำลังประมวลผลพร้อมกัน
+- **Avg In-Flight:** ค่าเฉลี่ยจากการสุ่มอ่านจำนวน in-flight ระหว่างการรัน sampler รวมช่วงเตรียม threads ก่อนเปิด gate ด้วย จึงไม่ใช่ค่าเฉลี่ยเฉพาะช่วง Total Time
+
+ความสัมพันธ์ที่ใช้ตรวจยอดคือ `Completed = Succeeded + Business Reject`, `Transport Fail = Timeout + Transport Errors` และ `Planned Requests = Completed + Transport Fail + Skipped Requests` ส่วนสูตรในโค้ดตรวจได้ที่ [load_test.cpp](../src/benchmark/load_test.cpp)
 
 ---
 
@@ -198,7 +225,7 @@ output.log:
   Planned Requests: 20000
   Completed       : 20000 / Transport Fail : 0
   Total Time      : 0.141 sec
-  Throughput      : 141848.66 req/sec   ← highest single-run throughput
+  Throughput      : 141848.66 req/sec   ← สูงสุดในสามรอบของระดับ 200 clients
   Average Latency : 1.36 ms
   Peak In-Flight  : 200 / Avg In-Flight : 159.18
   p95 Latency     : 2.56 ms / p99 Latency : 3.71 ms / Max : 6.31 ms
@@ -331,10 +358,10 @@ output.log:
 
 | Run | Throughput (req/s) | Avg Latency (ms) | p95 (ms) | p99 (ms) | Max (ms) | Completed | Transport Fail | Timeout | สถานะ |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| 1 | 3,036.75 | 640.30 | 2,118.91 | 3,563.43 | 9,845.86 | 199,982 | 0 | **18** | PARTIAL |
-| 2 | 1,998.18 | 958.67 | 2,885.96 | 4,835.44 | 9,973.18 | 199,966 | 0 | **34** | PARTIAL |
-| 3 | 1,976.93 | 982.93 | 2,755.02 | 4,703.31 | 9,959.35 | 199,933 | 0 | **67** | PARTIAL |
-| **เฉลี่ย** | **2,337.29** | **860.63** | — | — | — | — | **0** | **119 รวม** | **PARTIAL 3/3** |
+| 1 | 3,036.75 | 640.30 | 2,118.91 | 3,563.43 | 9,845.86 | 199,982 | **18** | **18** | PARTIAL |
+| 2 | 1,998.18 | 958.67 | 2,885.96 | 4,835.44 | 9,973.18 | 199,966 | **34** | **34** | PARTIAL |
+| 3 | 1,976.93 | 982.93 | 2,755.02 | 4,703.31 | 9,959.35 | 199,933 | **67** | **67** | PARTIAL |
+| **สรุป 3 รอบ** | **2,337.29** | **860.63** | — | — | — | — | **119 รวม** | **119 รวม** | **PARTIAL 3/3** |
 
 ### หลักฐาน log
 
@@ -343,7 +370,7 @@ output.log:
   Logical Clients : 2000
   Planned Requests: 200000
   Completed       : 199982    ← ไม่ครบ 200000
-  Transport Fail  : 0
+  Transport Fail  : 18        ← รวม 18 timeouts; Transport Errors ประเภทอื่นเป็น 0
   Completion Rate : 99.99%
   Total Time      : 65.854 sec
   Throughput      : 3036.75 req/sec
@@ -375,13 +402,22 @@ output.log:
   p95 Latency     : 2755.02 ms / p99 Latency : 4703.31 ms / Max : 9959.35 ms
 ```
 
-> Timeout เพิ่มขึ้นระหว่างรอบ (18→34→67) แสดงว่า IPC queue congestion สะสมตามเวลา ไม่ใช่แค่ burst ต้น
+> Timeout ในสามรอบเท่ากับ 18, 34 และ 67 แต่แต่ละรอบเริ่ม server ใหม่ จึงใช้แนวโน้มนี้สรุปว่าคิวสะสมข้ามรอบไม่ได้ ตัวเลขรวมยังไม่บอกว่า timeout เกิดช่วงใดของแต่ละรอบ
 
 ---
 
 ## 10. สรุปผล Load Test ทั้งหมด
 
 ### ตารางสรุปรายระดับ
+
+**คำอธิบายคอลัมน์:**
+
+- **Clients:** จำนวน logical clients ที่ใช้ในการทดลองระดับนั้น แต่ละรายส่ง 100 คำขอต่อรอบ
+- **คำขอ/รอบ:** จำนวนคำขอที่วางแผนต่อหนึ่งรอบ เท่ากับ Clients × 100 ไม่ใช่ยอดรวมสามรอบ
+- **Throughput เฉลี่ย (req/s):** ค่าเฉลี่ยเลขคณิตของ throughput จากสามรอบ ไม่ใช่นำจำนวนคำขอรวมมาหารเวลารวม
+- **Latency เฉลี่ย (ms):** ค่าเฉลี่ยของ Avg Latency ทั้งสามรอบ โดย Avg Latency ของแต่ละรอบไม่รวมคำขอที่ timeout
+- **Timeout รวม 3 รอบ:** ผลบวกของจำนวน timeout ทั้งสามรอบ เช่นระดับ 2,000 clients คือ 18 + 34 + 67 = 119 ไม่ใช่ค่าเฉลี่ยต่อรอบ
+- **Zone:** ป้ายสรุปแนวโน้มจากข้อมูลชุดนี้: `Scaling` คือ throughput เฉลี่ยเพิ่มขึ้นตาม clients, `Peak` คือระดับที่มี throughput เฉลี่ยสูงสุด, `Saturated` คือช่วงที่ throughput ลดลงและ latency เพิ่มขึ้น และ `Degraded` คือพบการตอบไม่ครบจาก timeout ป้ายเหล่านี้เป็นการตีความผล ไม่ใช่สถานะที่โปรแกรมส่งออกหรือหลักฐานระบุคอขวดเฉพาะส่วน
 
 | Clients | คำขอ/รอบ | Throughput เฉลี่ย (req/s) | Latency เฉลี่ย (ms) | Timeout รวม 3 รอบ | Zone |
 | ---: | ---: | ---: | ---: | ---: | --- |
@@ -394,7 +430,16 @@ output.log:
 | 1,500 | 150,000 | 2,574.92 | 575.74 | 0 | 🟡 Saturated |
 | 2,000 | 200,000 | 2,337.29 | 860.63 | 119 | 🔴 Degraded |
 
-### Performance comparison (Verbose vs Quiet)
+### Performance comparison ของ Quiet mode
+
+ตารางนี้เลือกเฉพาะจุดสำคัญของ MIXED แบบ quiet ไม่ได้มีข้อมูล verbose ให้เปรียบเทียบ
+
+- **Log mode:** รูปแบบการเขียน log ของ server ทุกแถวในตารางนี้เป็น quiet
+- **Validated point:** จำนวน clients ที่ทดลองจริงในจุดนั้น คำว่า validated ไม่ได้หมายความว่าทุกจุดผ่าน
+- **Pass rate:** จำนวนรอบที่ผ่านเกณฑ์ต่อทั้งหมดสามรอบ เช่น `0/3 (partial)` หมายถึงทั้งสามรอบตอบคำขอไม่ครบ
+- **Mean throughput:** ค่าเฉลี่ย throughput สามรอบ หน่วยคำขอต่อวินาที รวม response ที่ถูกปฏิเสธตามเงื่อนไขธุรกิจ
+- **Mean latency:** ค่าเฉลี่ย Avg Latency สามรอบ หน่วย ms โดยไม่รวมคำขอที่ timeout ใน latency ของแต่ละรอบ
+- **หมายเหตุ:** คำอธิบายเหตุผลที่เลือกจุดนั้น เช่น throughput เฉลี่ยสูงสุด ระดับสูงสุดที่ผ่าน 3/3 ในชุดนี้ หรือระดับแรกที่พบ timeout ไม่ใช่ขีดจำกัดตายตัวของระบบ
 
 | Log mode | Validated point | Pass rate | Mean throughput | Mean latency | หมายเหตุ |
 | --- | ---: | --- | ---: | ---: | --- |
