@@ -119,6 +119,7 @@ else
 fi
 assert_contains "$OUTPUT" 'Load Test - Logical clients and performance metrics' 'Load Test form is rendered'
 assert_contains "$OUTPUT" 'Total requests: 50000' 'Load Test defaults are rendered'
+assert_contains "$OUTPUT" 'Race delay: off (Load Test only)' 'Load Test explains that race delay is disabled'
 assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'Navigation does not clear the full screen'
 assert_count "$OUTPUT" 1 'AIRPLANE RESERVATION - TERMINAL CONTROL PANEL' 'Navigation does not redraw the unchanged header'
 

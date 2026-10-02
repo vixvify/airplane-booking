@@ -8,7 +8,7 @@ CONTAINER="${AIRPLANE_CONTAINER_NAME:-airplane-reservation}"
 MANAGED_LABEL="org.airplane-reservation.managed"
 
 usage() {
-  echo "Usage: bash scripts/container.sh {build|start [sequential|nosync|sync] [worker_count]|stop|status|mode|workers|exec [-i|-it] <command...>|logs [options]}" >&2
+  echo "Usage: bash scripts/container.sh {build|start [sequential|nosync|sync] [worker_count]|stop|status|mode|workers|delay|exec [-i|-it] <command...>|logs [options]}" >&2
   exit 2
 }
 
@@ -39,6 +39,11 @@ case "$action" in
     ;;
   start)
     [ "$#" -le 2 ] || usage
+    race_delay="${AIRPLANE_RACE_DELAY:-on}"
+    case "$race_delay" in
+      on|off) ;;
+      *) echo "AIRPLANE_RACE_DELAY must be on or off" >&2; exit 2 ;;
+    esac
     experiment="${1:-${AIRPLANE_EXPERIMENT:-nosync}}"
     case "$experiment" in
       sequential) mode=sync; workers=1 ;;
@@ -60,6 +65,7 @@ case "$action" in
     "$DOCKER" run -d --rm --name "$CONTAINER" \
       --label "$MANAGED_LABEL=true" \
       -e "AIRPLANE_LOG_MODE=${AIRPLANE_LOG_MODE:-verbose}" \
+      -e "AIRPLANE_RACE_DELAY=$race_delay" \
       "$IMAGE" ./server "$mode" "$workers"
     for _ in {1..100}; do
       if [ "$("$DOCKER" inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)" != true ]; then
@@ -112,6 +118,12 @@ case "$action" in
     [ "$#" -eq 0 ] || usage
     read_server_config
     echo "$WORKER_COUNT"
+    ;;
+  delay)
+    [ "$#" -eq 0 ] || usage
+    server_env="$("$DOCKER" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER")"
+    delay_setting="$(printf '%s\n' "$server_env" | sed -n 's/^AIRPLANE_RACE_DELAY=//p' | tail -n 1)"
+    if [ "$delay_setting" = off ]; then echo off; else echo on; fi
     ;;
   exec)
     options=()

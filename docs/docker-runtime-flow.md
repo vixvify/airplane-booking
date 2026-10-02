@@ -183,7 +183,7 @@ flowchart TD
     K -->|Load Test| N[load-test.sh]
 ```
 
-ฟังก์ชัน `prepare_server` ใน `scripts/menu.sh` เป็นตัวดูแล build, หยุด container เดิม และเริ่ม server ใหม่ จึงทำให้ทุก task เริ่มด้วย seat state และ message queues ชุดใหม่
+ฟังก์ชัน `prepare_server` ใน `scripts/menu.sh` เป็นตัวดูแล build, หยุด container เดิม และเริ่ม server ใหม่ จึงทำให้ทุก task เริ่มด้วย seat state และ message queues ชุดใหม่ สำหรับ Load Test เท่านั้น TUI ส่ง `AIRPLANE_RACE_DELAY=off` เข้า server container; Experiment และ Demo ใช้ delay ตามเดิม การรัน Load Test แบบ manual ต้องเริ่ม server ด้วยค่านี้ก่อนเช่นกัน
 
 ## 5. Experiment 1-3: `concurrent-test.sh`
 
