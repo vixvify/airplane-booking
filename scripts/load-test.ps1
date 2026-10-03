@@ -8,11 +8,7 @@ param(
     [ValidateRange(1, [int]::MaxValue)]
     [int]$Concurrency,
 
-    [Parameter(Mandatory = $true, Position = 2)]
-    [ValidateSet("STATUS", "RESERVE", "CANCEL")]
-    [string]$Operation,
-
-    [Parameter(Position = 3)]
+    [Parameter(Position = 2)]
     [ValidateRange(1, 20)]
     [Nullable[int]]$SeatId,
 
@@ -21,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Operation = $Operation.ToUpperInvariant()
+$Operation = "MIXED"
 if ([string]::IsNullOrWhiteSpace($ContainerName)) {
     $ContainerName = if ([string]::IsNullOrWhiteSpace($env:AIRPLANE_CONTAINER_NAME)) {
         "airplane-reservation"
@@ -168,6 +164,8 @@ finally {
         "total_requests=$TotalRequests"
         "concurrency=$Concurrency"
         "operation=$Operation"
+        "run_timeout_seconds=120"
+        "run_timeout_triggered=$([bool]($loadExitCode -eq 124))"
         "seat_id=$seatDescription"
         "load_output=output.log"
         "server_log=server.log"

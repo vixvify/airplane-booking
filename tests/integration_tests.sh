@@ -115,6 +115,12 @@ assert_contains "$status_load" "Transport Fail  : 0" "STATUS load should have no
 assert_contains "$status_load" "Operation OK    : 1000" "STATUS load should succeed"
 pass "high-volume STATUS load"
 
+uneven_load="$(run_load_test "non-divisible request count" 101 10 STATUS)"
+assert_contains "$uneven_load" "Planned Requests: 101" "load test should preserve the requested total"
+assert_contains "$uneven_load" "Requests/Client : 10 (+1 for first 1 clients)" "load test should distribute the remainder"
+assert_contains "$uneven_load" "Completed       : 101" "load test should execute every requested operation"
+pass "non-divisible total requests are not silently dropped"
+
 reserve_load="$(run_load_test "fixed-seat RESERVE load test" 100 20 RESERVE 10)"
 assert_contains "$reserve_load" "Completed       : 100" "RESERVE load should complete every request"
 assert_contains "$reserve_load" "Transport Fail  : 0" "RESERVE load should have no transport failures"
@@ -161,6 +167,44 @@ start_server sync 1
 recovery_output="$(run_client 1 $'STATUS 1\nQUIT\n')"
 assert_contains "$recovery_output" "Seat 1 is AVAILABLE" "server should replace a stale queue on startup"
 pass "stale queue recovery after an unclean shutdown"
+
+# A fresh RESERVE takes at least 50 ms with the race delay enabled. The
+# test-only override verifies the 120-second whole-run deadline quickly.
+runtime_record="$TEST_TMP_DIR/load-runtime-timeout.log"
+set +e
+AIRPLANE_LOAD_TIMEOUT_MS=20 timeout 5s "$ROOT_DIR/load_test" 100 1 MIXED 10 >"$runtime_record" 2>&1
+runtime_status=$?
+set -e
+assert_equals "$runtime_status" "124" "load test should time out during execution"
+runtime_output="$(cat "$runtime_record")"
+assert_contains "$runtime_output" "Run Timeout     : YES" "load test should report the run timeout"
+assert_contains "$runtime_output" "Timeout Phase   : execution" "load test should identify execution timeout"
+pass "load test stops at the whole-run deadline during execution"
+
+# Responses continue arriving during this run (server delay is 50-500 ms),
+# but the total runtime must still be capped rather than resetting on each reply.
+progress_record="$TEST_TMP_DIR/load-progress-timeout.log"
+set +e
+AIRPLANE_LOAD_TIMEOUT_MS=700 timeout 5s "$ROOT_DIR/load_test" 100 1 MIXED 10 >"$progress_record" 2>&1
+progress_status=$?
+set -e
+assert_equals "$progress_status" "124" "load test should time out despite receiving replies"
+completed_before_timeout="$(sed -n 's/^Completed[[:space:]]*:[[:space:]]*//p' "$progress_record" | head -n 1)"
+if ! [[ "$completed_before_timeout" =~ ^[1-9][0-9]*$ ]]; then
+  fail "whole-run timeout test did not receive any reply before the deadline"
+fi
+pass "whole-run deadline is not reset by responses"
+
+setup_record="$TEST_TMP_DIR/load-setup-timeout.log"
+set +e
+AIRPLANE_LOAD_TIMEOUT_MS=1 timeout 5s "$ROOT_DIR/load_test" 1000 500 MIXED 10 >"$setup_record" 2>&1
+setup_status=$?
+set -e
+assert_equals "$setup_status" "124" "load test should time out during client setup"
+setup_output="$(cat "$setup_record")"
+assert_contains "$setup_output" "Run Timeout     : YES" "setup timeout should be reported"
+assert_contains "$setup_output" "Timeout Phase   : setup" "load test should identify setup timeout"
+pass "load test stops at the whole-run deadline during client setup"
 
 stop_server
 

@@ -392,6 +392,7 @@ ui_render_load_report() {
   fi
   case "$consistency" in
     PASSED*) printf '  %-18s : %s%s[PASS] %s%s\n' 'Consistency' "$UI_BOLD" "$UI_GREEN" "$consistency" "$UI_RESET" ;;
+    'NOT CHECKED'*) printf '  %-18s : %s%s[INFO] %s%s\n' 'Consistency' "$UI_BOLD" "$UI_YELLOW" "$consistency" "$UI_RESET" ;;
     *) printf '  %-18s : %s%s[FAIL] %s%s\n' 'Consistency' "$UI_BOLD" "$UI_RED" "$consistency" "$UI_RESET" ;;
   esac
 

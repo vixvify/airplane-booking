@@ -5,10 +5,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <string>
 #include <thread>
@@ -78,6 +81,7 @@ void printUsage(const char* prog) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    const auto benchmarkStart = chrono::steady_clock::now();
     if (argc < 4) {
         printUsage(argv[0]);
         return 1;
@@ -85,9 +89,18 @@ int main(int argc, char* argv[]) {
 
     int logicalClients = 0;
     int requestsPerClient = 0;
+    int extraRequests = 0;
     int totalRequests = 0;
     Operation operation = Operation::STATUS;
     int fixedSeatId = 0;
+    int runTimeoutMs = 120000;
+    if (const char* configuredTimeout = std::getenv("AIRPLANE_LOAD_TIMEOUT_MS")) {
+        if (!parsePositiveInt(configuredTimeout, runTimeoutMs)) {
+            cerr << "AIRPLANE_LOAD_TIMEOUT_MS must be a positive integer\n";
+            return 1;
+        }
+    }
+    const auto deadline = benchmarkStart + chrono::milliseconds(runTimeoutMs);
 
     bool useFlags = false;
     for (int i = 1; i < argc; ++i) {
@@ -131,6 +144,10 @@ int main(int argc, char* argv[]) {
             cerr << "Both --clients and --requests must be positive\n";
             return 1;
         }
+        if (requestsPerClient > numeric_limits<int>::max() / logicalClients) {
+            cerr << "Total requests exceeds the supported integer range\n";
+            return 1;
+        }
         totalRequests = logicalClients * requestsPerClient;
     } else {
         if (argc != 4 && argc != 5) {
@@ -158,8 +175,7 @@ int main(int argc, char* argv[]) {
             logicalClients = totalRequests;
         }
         requestsPerClient = totalRequests / logicalClients;
-        // Adjust totalRequests to match logicalClients * requestsPerClient
-        totalRequests = logicalClients * requestsPerClient;
+        extraRequests = totalRequests % logicalClients;
     }
 
     if (logicalClients > 100000) {
@@ -181,9 +197,14 @@ int main(int argc, char* argv[]) {
     cout << " Airplane Reservation Load Test\n";
     cout << "====================================\n";
     cout << "Logical Clients : " << logicalClients << "\n";
-    cout << "Requests/Client : " << requestsPerClient << "\n";
+    cout << "Requests/Client : " << requestsPerClient;
+    if (extraRequests > 0) {
+        cout << " (+1 for first " << extraRequests << " clients)";
+    }
+    cout << "\n";
     cout << "Planned Requests: " << totalRequests << "\n";
     cout << "Operation       : " << operationName(operation) << "\n";
+    cout << "Run Timeout     : " << runTimeoutMs / 1000.0 << " sec (including setup)\n";
     if (fixedSeatId > 0) {
         cout << "Target Seat     : " << fixedSeatId << "\n";
     } else {
@@ -212,9 +233,25 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    // Start gate to ensure all logical client threads begin concurrently
+    // Block workers without burning CPU while clients and reply queues are prepared.
     atomic<int> threadsReady{0};
-    atomic<bool> startGate{false};
+    mutex startMutex;
+    condition_variable startCondition;
+    bool startGate = false;
+    atomic<bool> stopRequested{false};
+    atomic<bool> stopWatchdog{false};
+    atomic<bool> runTimedOut{false};
+    mutex watchdogMutex;
+    condition_variable watchdogCondition;
+    thread watchdogThread([&] {
+        unique_lock<mutex> lock(watchdogMutex);
+        if (!watchdogCondition.wait_until(lock, deadline, [&] {
+                return stopWatchdog.load(memory_order_relaxed);
+            })) {
+            runTimedOut.store(true, memory_order_relaxed);
+            stopRequested.store(true, memory_order_relaxed);
+        }
+    });
 
     vector<ThreadStats> threadStats(logicalClients);
     vector<thread> threads;
@@ -224,17 +261,24 @@ int main(int argc, char* argv[]) {
     string threadCreationError;
 
     for (int i = 0; i < logicalClients; ++i) {
+        if (stopRequested.load(memory_order_relaxed)
+            || chrono::steady_clock::now() >= deadline) {
+            runTimedOut.store(true, memory_order_relaxed);
+            stopRequested.store(true, memory_order_relaxed);
+            break;
+        }
         try {
             threads.emplace_back([&, i] {
                 const int clientId = 10000 + i;
+                const int clientRequests = requestsPerClient + (i < extraRequests ? 1 : 0);
                 auto& stats = threadStats[i];
-                stats.latenciesUs.reserve(requestsPerClient);
+                stats.latenciesUs.reserve(clientRequests);
 
                 std::unique_ptr<ipc::MessageQueue> replies;
                 try {
                     replies = std::make_unique<ipc::MessageQueue>(ipc::MessageQueue::createPrivateResponse());
                 } catch (const exception& error) {
-                    stats.transportErrors = requestsPerClient;
+                    stats.transportErrors = clientRequests;
                     threadsReady.fetch_add(1, memory_order_release);
                     cerr << "Client " << clientId << ": " << error.what() << "\n";
                     return;
@@ -242,12 +286,16 @@ int main(int argc, char* argv[]) {
 
                 // Wait at the barrier until all threads are created and ready
                 threadsReady.fetch_add(1, memory_order_release);
-                while (!startGate.load(memory_order_acquire)) {
-                    this_thread::yield();
+                {
+                    unique_lock<mutex> lock(startMutex);
+                    startCondition.wait(lock, [&] { return startGate; });
                 }
 
                 // Execute client workload
-                for (int req = 0; req < requestsPerClient; ++req) {
+                for (int req = 0; req < clientRequests; ++req) {
+                    if (stopRequested.load(memory_order_relaxed)) {
+                        break;
+                    }
                     Operation currentOp = operation;
                     int seatId = 0;
 
@@ -263,11 +311,18 @@ int main(int argc, char* argv[]) {
                     string command = makeCommand(currentOp, seatId);
 
                     const auto start = chrono::steady_clock::now();
+                    if (start >= deadline) {
+                        stopRequested.store(true, memory_order_relaxed);
+                        break;
+                    }
+                    const auto remaining = chrono::duration_cast<chrono::milliseconds>(deadline - start);
+                    const auto requestTimeout = min(chrono::milliseconds(10000),
+                                                    max(chrono::milliseconds(1), remaining));
                     try {
                         const auto response = ipc::exchangeCommand(
                             requestQueueId, replies->id(),
                             clientId, command,
-                            chrono::seconds(10),
+                            requestTimeout,
                             &inFlightTracker
                         );
                         const auto end = chrono::steady_clock::now();
@@ -295,6 +350,7 @@ int main(int argc, char* argv[]) {
         } catch (const exception& err) {
             threadCreationFailure = true;
             threadCreationError = err.what();
+            stopRequested.store(true, memory_order_relaxed);
             cerr << "Failed to create thread " << i << ": " << err.what() << "\n";
             break;
         }
@@ -302,14 +358,31 @@ int main(int argc, char* argv[]) {
 
     const int osClientThreads = static_cast<int>(threads.size());
 
-    // Wait until all spawned threads are at the barrier
-    while (threadsReady.load(memory_order_acquire) < osClientThreads) {
-        this_thread::sleep_for(chrono::microseconds(50));
+    // A setup failure or deadline must release every worker already created.
+    while (!stopRequested.load(memory_order_relaxed)
+           && threadsReady.load(memory_order_acquire) < osClientThreads) {
+        if (chrono::steady_clock::now() >= deadline) {
+            runTimedOut.store(true, memory_order_relaxed);
+            stopRequested.store(true, memory_order_relaxed);
+            break;
+        }
+        this_thread::sleep_for(chrono::milliseconds(1));
     }
 
-    // Release the barrier gate and start timer
+    const bool setupTimedOut = runTimedOut.load(memory_order_relaxed)
+        || chrono::steady_clock::now() >= deadline;
+    if (setupTimedOut) {
+        runTimedOut.store(true, memory_order_relaxed);
+        stopRequested.store(true, memory_order_relaxed);
+    }
+
+    // Execution time remains separate from setup time for throughput reporting.
     const auto testStart = chrono::steady_clock::now();
-    startGate.store(true, memory_order_release);
+    {
+        lock_guard<mutex> lock(startMutex);
+        startGate = true;
+    }
+    startCondition.notify_all();
 
     for (auto& t : threads) {
         if (t.joinable()) {
@@ -318,12 +391,19 @@ int main(int argc, char* argv[]) {
     }
 
     const auto testEnd = chrono::steady_clock::now();
+    if (testEnd >= deadline) {
+        runTimedOut.store(true, memory_order_relaxed);
+    }
+    stopWatchdog.store(true, memory_order_relaxed);
+    watchdogCondition.notify_one();
+    watchdogThread.join();
     stopSampling.store(true, memory_order_relaxed);
     if (samplerThread.joinable()) {
         samplerThread.join();
     }
 
     const double totalSeconds = chrono::duration<double>(testEnd - testStart).count();
+    const double wallSeconds = chrono::duration<double>(testEnd - benchmarkStart).count();
 
     // Aggregate statistics
     long long totalCompleted = 0;
@@ -392,19 +472,27 @@ int main(int argc, char* argv[]) {
     cout << "Completion Rate : " << completionRate << "%\n";
     cout << fixed << setprecision(3);
     cout << "Total Time      : " << totalSeconds << " sec\n";
+    cout << "Wall Time       : " << wallSeconds << " sec (including setup)\n";
     cout << fixed << setprecision(2);
     cout << "Throughput      : " << throughput << " req/sec\n";
     cout << "Average Latency : " << avgLatencyMs << " ms\n";
     cout << "------------------------------------\n";
     cout << "Logical Clients : " << logicalClients << "\n";
     cout << "OS Client Threads: " << osClientThreads << (threadCreationFailure ? " (PARTIAL CREATION)" : "") << "\n";
-    cout << "Requests/Client : " << requestsPerClient << "\n";
+    cout << "Requests/Client : " << requestsPerClient;
+    if (extraRequests > 0) {
+        cout << " (+1 for first " << extraRequests << " clients)";
+    }
+    cout << "\n";
     cout << "Planned Requests: " << totalRequests << "\n";
     cout << "Completed       : " << totalCompleted << "\n";
     cout << "Succeeded       : " << totalOpSuccess << "\n";
     cout << "Business Reject : " << totalBusinessRejected << "\n";
     cout << "Timeouts        : " << totalTimeouts << "\n";
     cout << "Transport Errors: " << totalTransportErrors << "\n";
+    cout << "Run Timeout     : " << (runTimedOut.load() ? "YES" : "NO") << "\n";
+    cout << "Timeout Phase   : " << (setupTimedOut ? "setup" :
+        (runTimedOut.load() ? "execution" : "none")) << "\n";
     cout << "Skipped Requests: " << skippedRequests << "\n";
     cout << "Peak In-Flight  : " << peakInFlight.load() << "\n";
     cout << "Avg In-Flight   : " << avgInFlight << "\n";
@@ -413,6 +501,12 @@ int main(int argc, char* argv[]) {
     cout << "Max Latency     : " << maxLatencyMs << " ms\n";
     cout << "Server Parallel : 3 (Workers)\n";
     cout << "====================================\n";
+
+    if (runTimedOut.load()) {
+        cerr << "Load test timed out after " << runTimeoutMs / 1000.0
+             << " seconds (including client setup).\n";
+        return 124;
+    }
 
     if (threadCreationFailure) {
         cerr << "Setup failure: " << threadCreationError << "\n";
