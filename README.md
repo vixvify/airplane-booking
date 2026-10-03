@@ -31,8 +31,8 @@ bash scripts/menu.sh
 ปุ่มควบคุม:
 
 - `↑`/`↓` เลือกรายการหรือช่องตั้งค่า
-- `←`/`→` เปลี่ยนค่า
-- `Enter` กรอกตัวเลขหรือเริ่มรัน
+- `←`/`→` เปลี่ยนตัวเลือก เช่น mode, command และ log mode (ไม่เปลี่ยนตัวเลข)
+- `Enter` ที่ช่องตัวเลขเพื่อกรอกค่า หรือที่ `RUN` เพื่อเริ่มรัน
 - `Esc` กลับเมนูก่อนหน้า
 - `Q` ออกจากโปรแกรม
 
@@ -77,12 +77,12 @@ Workers ทำงานพร้อมกันแต่ใช้ per-seat mutex
 
 1. เลือก `Load Test`
 2. เลือก `Server mode`: `sequential`, `nosync` หรือ `sync`
-3. ตั้ง workers, total requests, concurrency/logical clients และ operation
+3. กด `Enter` ที่ช่องตัวเลขเพื่อกรอก workers, total requests และ concurrency/logical clients; workload เป็น `MIXED` (`RESERVE` สลับ `CANCEL`) เสมอ
 4. เลือก `round-robin` เพื่อวน Seat 1–20 หรือ `fixed` เพื่อระบุ target seat
 5. แนะนำ `Server logs: quiet` เมื่อต้องการวัดประสิทธิภาพ
 6. เลือก `RUN` แล้วกด `Enter`
 
-ปุ่ม `←`/`→` ที่ total requests เปลี่ยนค่าครั้งละ 100,000 หรือกด `Enter` เพื่อกรอกเอง ผลลัพธ์แสดง throughput, average latency, total time, completion, transport failures, operation results และ consistency
+ช่องตัวเลขทุกช่องใน TUI ให้กด `Enter` แล้วพิมพ์ค่าที่ต้องการ; `←`/`→` ใช้เปลี่ยนตัวเลือกที่ไม่ใช่ตัวเลขเท่านั้น ผลลัพธ์แสดง throughput, average latency, total time, completion, transport failures และ operation results
 
 ### การอ่านผลจาก TUI
 
@@ -227,7 +227,7 @@ Git Bash/Linux:
 ```bash
 bash scripts/container.sh stop
 AIRPLANE_LOG_MODE=quiet AIRPLANE_RACE_DELAY=off bash scripts/container.sh start sync 3
-bash scripts/load-test.sh 50000 100 RESERVE 10
+bash scripts/load-test.sh 50000 100 10
 ```
 
 PowerShell:
@@ -235,18 +235,20 @@ PowerShell:
 ```powershell
 & $gitBash -lc "bash scripts/container.sh stop"
 & $gitBash -lc "AIRPLANE_LOG_MODE=quiet AIRPLANE_RACE_DELAY=off bash scripts/container.sh start sync 3"
-.\scripts\load-test.ps1 50000 100 RESERVE 10
+.\scripts\load-test.ps1 50000 100 10
 ```
 
 รูปแบบคำสั่ง:
 
 ```text
-load-test <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]
+load-test <total_requests> <concurrency> [seat_id]
 ```
 
-ถ้าไม่ระบุ `seat_id` โปรแกรมจะวน Seat 1–20 แบบ round-robin ตัวอย่าง `50000 100` หมายถึง logical clients 100 รายส่งรวม 50,000 requests แต่ละ thread ใช้ client ID และ private reply queue ของตัวเองตลอดการรัน ไม่ได้สร้าง `./client` หรือ container เพิ่ม
+ถ้าไม่ระบุ `seat_id` โปรแกรมจะวน Seat 1–20 แบบ round-robin ตัวอย่าง `50000 100` หมายถึง logical clients สูงสุด 100 รายทำงานพร้อมกัน ส่งรวม 50,000 requests (เฉลี่ยรายละ 500 คำสั่ง) แต่ละ client เป็น OS thread ที่ใช้ client ID และ private reply queue ของตัวเองตลอดการรัน ไม่ได้สร้าง `./client` หรือ container เพิ่ม `concurrency` คือจำนวน clients ที่เตรียมให้ทำงานพร้อมกัน ไม่ใช่จำนวน worker ของ server หรือจำนวน request ที่กำลังค้างจริง; ดูจำนวนค้างสูงสุดที่วัดได้จาก `Peak In-Flight` ถ้าหารไม่ลงตัว โปรแกรมจะแจก request ที่เหลือให้ clients บางรายเพิ่มคนละหนึ่งคำสั่ง โดยไม่ลดจำนวนรวมที่กรอก
 
-`Throughput` นับทุก request ที่ได้รับ response ต่อวินาที รวม response แบบ `REJECTED` ด้วย ดังนั้นการยิง `RESERVE 10` ซ้ำ 50,000 ครั้งในโหมด `sync` จะมีผู้จองสำเร็จอย่างมากหนึ่งราย แต่ request ที่ถูกปฏิเสธยังนับเป็น completed requests
+Load Test ใช้ workload `MIXED` โดยแต่ละ logical client ส่ง `RESERVE` แล้ว `CANCEL` สลับกัน ถ้าไม่ระบุ `seat_id` จะวน Seat 1–20; ถ้าระบุจะใช้ที่นั่งนั้นตลอด `Throughput` นับทุก request ที่ได้รับ response ต่อวินาที รวม response แบบ `REJECTED` ด้วย `Total Time` ใช้วัดช่วงส่งคำสั่ง ส่วน `Wall Time` รวมเวลาเตรียม clients หากทั้งรอบเกิน 120 วินาที (รวมช่วงสร้าง threads) benchmark จะหยุดและคืน exit code 124; request ที่กำลังรออยู่ใช้ deadline ไม่เกินเวลาที่เหลือของรอบทดสอบ คำสั่งที่ส่งแล้วก่อน timeout อาจถูก server ประมวลผลต่อ จึงไม่ควรนำผล timeout ไปตีความว่าไม่มีการเปลี่ยนสถานะที่นั่ง
+
+หากกด `Ctrl+C` ระหว่าง `docker exec` แล้ว terminal หยุด แต่สงสัยว่า benchmark ยังทำงานอยู่ ให้ตรวจด้วย `docker top airplane-reservation` ก่อนเริ่มรอบใหม่ การเริ่ม server ใหม่ผ่าน TUI จะสร้าง container/IPC namespace ใหม่และล้าง private reply queues ของรอบเก่า (พร้อมรีเซ็ตสถานะที่นั่ง)
 
 Load Test ปิด random race delay 50–500 ms เพื่อวัด throughput/latency ของระบบโดยไม่รวมเวลาหน่วงเพื่อสาธิต race condition; TUI ตั้งค่านี้ให้อัตโนมัติ ส่วนการรันแบบ manual ต้องเริ่ม server ด้วย `AIRPLANE_RACE_DELAY=off` ตามตัวอย่างด้านบน หาก server ที่เปิดอยู่ยังเปิด delay สคริปต์ Load Test จะแจ้งให้เริ่ม server ใหม่ การทดลองและ Demo ยังคงเปิด delay ตามเดิม
 

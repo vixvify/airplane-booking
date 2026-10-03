@@ -105,13 +105,13 @@ done
 export MOCK_SERVER_COMMAND='["./server","sync","5"]'
 echo "[PASS] running server configuration accepts arbitrary worker counts"
 
-if bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS >"$TEST_DIR/load-delay-on.log" 2>&1; then
+if bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 >"$TEST_DIR/load-delay-on.log" 2>&1; then
   fail "Load Test accepted a server with race delay enabled"
 fi
 grep -q 'requires AIRPLANE_RACE_DELAY=off' "$TEST_DIR/load-delay-on.log" ||
   fail "Load Test did not explain the race delay configuration"
 export MOCK_RACE_DELAY=off
-load_output="$(bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS)"
+load_output="$(bash "$ROOT_DIR/scripts/load-test.sh" 1000 20)"
 [[ "$load_output" == *"Load test finished. Results:"* ]] ||
   fail "Bash load-test wrapper did not complete"
 load_summary="$(sed -n 's/^Load test finished. Results: //p' <<<"$load_output" | tail -n 1)/summary.txt"
@@ -121,8 +121,14 @@ grep -q '^total_requests=1000$' "$load_summary" ||
   fail "Bash load-test summary is missing total requests"
 grep -q '^concurrency=20$' "$load_summary" ||
   fail "Bash load-test summary is missing concurrency"
+grep -q '^operation=MIXED$' "$load_summary" ||
+  fail "Bash load-test must use the mixed workload"
+grep -q '^exec airplane-reservation ./load_test 1000 20 MIXED$' "$MOCK_TRACE" ||
+  fail "Bash load-test did not pass MIXED to the benchmark"
 grep -q '^race_delay=off$' "$load_summary" ||
   fail "Bash load-test summary is missing race delay configuration"
+[ "$(grep -c '^run_timeout_seconds=120$' "$load_summary")" -eq 1 ] ||
+  fail "Bash load-test summary is missing the whole-run timeout"
 [ -f "$load_report" ] || fail "Bash load-test report was not saved"
 for section in CONFIGURATION RESULTS ARTIFACTS; do
   grep -qx "$section" "$load_report" || fail "Load-test report is missing $section section"
@@ -132,6 +138,13 @@ grep -q '^Throughput: 12000 req/sec$' "$load_report" ||
 grep -q '^Seat 20 : AVAILABLE$' "$load_seat_map" ||
   fail "Load-test result is missing the final seat map"
 echo "[PASS] Bash load-test wrapper saves output and summary"
+
+if bash "$ROOT_DIR/scripts/load-test.sh" 1000 20 STATUS >"$TEST_DIR/load-old-operation.log" 2>&1; then
+  fail "Bash load-test still accepts an operation argument"
+fi
+grep -q 'Usage: bash scripts/load-test.sh' "$TEST_DIR/load-old-operation.log" ||
+  fail "Bash load-test did not explain the new argument format"
+echo "[PASS] Bash load-test no longer accepts operation selection"
 
 find "$RESULTS_DIR/demos/concurrent" -name summary.txt -exec grep -H 'exit_code=' {} + >"$TEST_DIR/summaries.log"
 grep -Eq 'exit_code=[1-9]' "$TEST_DIR/summaries.log" ||
