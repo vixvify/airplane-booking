@@ -3,7 +3,42 @@
 **ระบบ:** Airplane Reservation System  
 **อัลกอริทึม/รูปแบบการทำงาน:** Multi-Worker Thread Pool (3 Workers) + Ordered Mutex Locking (Deadlock-Free 2-Phase Concurrency Control)  
 **ช่องทางสื่อสาร (IPC):** Linux System V Message Queues (`msgsnd` / `msgrcv`)  
-**ชุดข้อมูลอ้างอิง:** การทดสอบวันที่ 1–2 ตุลาคม 2026 (รวมกว่า 655+ ล้าน Requests)
+**ชุดข้อมูลอ้างอิง:** การทดสอบวันที่ 1–3 ตุลาคม 2026 จากหลายชุดการทดลองและ workload
+
+## ผล Load Test รอบวันที่ 3 ตุลาคม 2026
+
+| ชุดทดสอบ | ระดับผ่านล่าสุด | ระดับที่หยุด (BOOM) | ผล ณ จุดหยุด | สถานะ Server |
+| :--- | ---: | ---: | :--- | :--- |
+| เพิ่ม clients และ requests พร้อมกัน | 400 × 400 | 800 × 800 | 496,549 / 640,000 Completed; request timeout 771; exit `124` จากเพดาน 120 วินาที | ยังตอบ `LIST` ได้ |
+| คง 100 clients เพิ่ม requests/client | 100 × 204,800 | 100 × 409,600 | 28,013,693 / 40,960,000 Completed; request timeout 0; exit `124` จากเพดาน 120 วินาที | ยังตอบ `LIST` ได้ |
+
+การทดลองนี้กำหนด Reserve:Cancel = 1:1 และใช้เพดาน 120 วินาทีต่อรอบรวมช่วง setup ตาม `main` ล่าสุด โดยตกลงให้นับการชนเพดานนี้เป็น BOOM เพื่อหยุดการไต่ระดับ แม้ไม่มี request-level timeout ก็ตาม จึงแยกสาเหตุเพดานเวลาของทั้งสองชุดออกจาก request timeout ไว้ชัดเจน ผลรายระดับและหลักฐานอยู่ใน [รายงานวันที่ 3 ตุลาคม](load-test-report-2026-10-03.md)
+
+ตัวชี้วัดในหัวข้อถัดไปเป็นผลจากชุดทดสอบมาตรฐานก่อนหน้า ไม่ใช่เพดานรวมของทุก workload; อ่านผลวันที่ 3 ตุลาคมแยกตามรูปแบบ concurrency และจำนวน requests ต่อ client
+
+### กราฟวันที่ 3 ตุลาคม — Throughput
+
+#### ชุด 1: เพิ่ม clients และ requests ต่อ client พร้อมกัน
+
+```mermaid
+xychart-beta
+    title "Throughput vs Clients and Requests per Client (Oct 3, 1:1 MIXED)"
+    x-axis ["50x50", "100x100", "200x200", "400x400", "800x800 BOOM"]
+    y-axis "Completed req/s" 0 --> 250000
+    line [48837, 232959, 120278, 22491, 4140]
+```
+
+#### ชุด 2: คง 100 clients แล้วเพิ่ม requests ต่อ client
+
+```mermaid
+xychart-beta
+    title "Throughput vs Requests per Client (Oct 3, 100 Clients, 1:1 MIXED)"
+    x-axis ["100", "200", "400", "800", "1.6k", "3.2k", "6.4k", "12.8k", "25.6k", "51.2k", "102.4k", "204.8k", "409.6k BOOM"]
+    y-axis "Completed req/s" 0 --> 250000
+    line [139477, 174839, 134434, 204417, 222100, 220020, 181930, 208424, 223358, 228833, 218283, 229982, 233464]
+```
+
+ค่าของรอบ BOOM แสดง throughput จาก requests ที่ตอบกลับก่อนหยุดเท่านั้น: 800×800 ชนเพดาน 120 วินาทีพร้อม request timeout 771 ครั้ง; ส่วน 100×409,600 ชนเพดาน 120 วินาทีโดยไม่มี request-level timeout และทำ Completed ได้ 68.39% ของแผน จึงไม่ควรอ่าน throughput จุดสุดท้ายว่า workload สำเร็จครบ
 
 ---
 
@@ -128,4 +163,5 @@ xychart-beta
 *เอกสารอ้างอิงและหลักฐานดิบ:*
 - *[docs/load-test-report-2026-10-01.md](load-test-report-2026-10-01.md) — รายงานมาตรฐานแยกตามระดับ Concurrency*
 - *[docs/load-test-report-2026-10-02.md](load-test-report-2026-10-02.md) — รายงานไต่โหลดและจุด Breakpoint*
+- *[docs/load-test-report-2026-10-03.md](load-test-report-2026-10-03.md) — ผลทดสอบสองรูปแบบที่ใช้เพดาน 120 วินาทีต่อรอบ*
 - *[docs/architecture.md](architecture.md) — สถาปัตยกรรมระบบและกลไก Lock Ordering*

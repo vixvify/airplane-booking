@@ -25,9 +25,8 @@
 | Compiler | GCC 14.3.0, `-std=c++17 -Wall -Wextra -pthread` |
 | Application timeout | 10 วินาทีต่อ request/response |
 | External run guard | 180 วินาทีต่อรอบ |
-| Started UTC | 2026-10-01T14:39:06.339273Z |
+| Started (UTC) | 01 OCT 2026 14:39:06 |
 
-**หลักฐาน:** `docs/evidence/2026-10-01/environment.json`
 
 ### Common controls
 
@@ -72,11 +71,11 @@ Baseline ใช้ worker เพียงหนึ่งตัว จึงป�
 
 ### Result summary
 
-| Run | Started UTC | Success | Rejected | Transport Fail | Final owner | Consistency |
+| Run | Started (UTC) | Success | Rejected | Transport Fail | Final owner | Consistency |
 | ---: | --- | ---: | ---: | ---: | --- | --- |
-| 1 | 2026-10-01T14:39:07.066916957Z | 1/5 | 4/5 | 0 | Client-2 | PASSED |
-| 2 | 2026-10-01T14:39:08.574695087Z | 1/5 | 4/5 | 0 | Client-2 | PASSED |
-| 3 | 2026-10-01T14:39:10.089449998Z | 1/5 | 4/5 | 0 | Client-2 | PASSED |
+| 1 | 01 OCT 2026 14:39:07 | 1/5 | 4/5 | 0 | Client-2 | PASSED |
+| 2 | 01 OCT 2026 14:39:08 | 1/5 | 4/5 | 0 | Client-2 | PASSED |
+| 3 | 01 OCT 2026 14:39:10 | 1/5 | 4/5 | 0 | Client-2 | PASSED |
 
 ### Client-by-client results
 
@@ -88,38 +87,121 @@ Baseline ใช้ worker เพียงหนึ่งตัว จึงป�
 
 ### หลักฐาน log (Experiment 1)
 
-**Run 1** — `experiment1-sync-w1-verbose-c5-r1` ใน `experiment-transcripts.txt`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-07\clients\client-2\output.log
-  Client-2 connected. Enter commands (LIST, STATUS, RESERVE, CANCEL, QUIT).
-  SUCCESS: Seat 10 reserved
+**Run 1** — `experiment1-sync-w1-verbose-c5-r1`
 
-artifacts\demos\concurrent\2026-10-01_14-39-07\clients\client-1\output.log
-  FAILED: Transaction cancelled because Seat 10 is already reserved
+Server log:
 
-artifacts\demos\concurrent\2026-10-01_14-39-07\seat-map.txt
-  Seat 10 : RESERVED by Client-2
-
-artifacts\demos\concurrent\2026-10-01_14-39-07\report.txt
-  Successful reservations: 1/5
-  Failed reservations: 4/5
-  Consistency check: PASSED
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] waiting for Seat 10
+[SEQ 3] [Worker-1] [Client-2] locked Seat 10
+[SEQ 4] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 5] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 6] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 7] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 8] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 9] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-3] locked Seat 10
+[SEQ 11] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 12] [Worker-1] [Client-3] leaving critical section: RESERVE transaction cancelled
+[SEQ 13] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 14] [Worker-1] [Client-4] waiting for Seat 10
+[SEQ 15] [Worker-1] [Client-4] locked Seat 10
+[SEQ 16] [Worker-1] [Client-4] entering critical section for RESERVE
+[SEQ 17] [Worker-1] [Client-4] leaving critical section: RESERVE transaction cancelled
+[SEQ 18] [Worker-1] [Client-5] received RESERVE 10
+[SEQ 19] [Worker-1] [Client-5] waiting for Seat 10
+[SEQ 20] [Worker-1] [Client-5] locked Seat 10
+[SEQ 21] [Worker-1] [Client-5] entering critical section for RESERVE
+[SEQ 22] [Worker-1] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 23] [Worker-1] [Client-1] received RESERVE 10
+[SEQ 24] [Worker-1] [Client-1] waiting for Seat 10
+[SEQ 25] [Worker-1] [Client-1] locked Seat 10
+[SEQ 26] [Worker-1] [Client-1] entering critical section for RESERVE
+[SEQ 27] [Worker-1] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 28] [Worker-1] [Client-2] received QUIT
+[SEQ 29] [Worker-1] [Client-3] received QUIT
+[SEQ 30] [Worker-1] [Client-5] received QUIT
+[SEQ 31] [Worker-1] [Client-4] received QUIT
+[SEQ 32] [Worker-1] [Client-1] received QUIT
 ```
 
 **Run 2** — `experiment1-sync-w1-verbose-c5-r2`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-08\clients\client-2\output.log
-  SUCCESS: Seat 10 reserved
-  Seat map: Seat 10 : RESERVED by Client-2
-  Consistency check: PASSED
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] waiting for Seat 10
+[SEQ 3] [Worker-1] [Client-2] locked Seat 10
+[SEQ 4] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 5] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 6] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 7] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 8] [Worker-1] [Client-1] received RESERVE 10
+[SEQ 9] [Worker-1] [Client-1] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-1] locked Seat 10
+[SEQ 11] [Worker-1] [Client-1] entering critical section for RESERVE
+[SEQ 12] [Worker-1] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 13] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 14] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 15] [Worker-1] [Client-3] locked Seat 10
+[SEQ 16] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 17] [Worker-1] [Client-3] leaving critical section: RESERVE transaction cancelled
+[SEQ 18] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 19] [Worker-1] [Client-4] waiting for Seat 10
+[SEQ 20] [Worker-1] [Client-4] locked Seat 10
+[SEQ 21] [Worker-1] [Client-4] entering critical section for RESERVE
+[SEQ 22] [Worker-1] [Client-4] leaving critical section: RESERVE transaction cancelled
+[SEQ 23] [Worker-1] [Client-5] received RESERVE 10
+[SEQ 24] [Worker-1] [Client-5] waiting for Seat 10
+[SEQ 25] [Worker-1] [Client-5] locked Seat 10
+[SEQ 26] [Worker-1] [Client-5] entering critical section for RESERVE
+[SEQ 27] [Worker-1] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 28] [Worker-1] [Client-2] received QUIT
+[SEQ 29] [Worker-1] [Client-3] received QUIT
+[SEQ 30] [Worker-1] [Client-1] received QUIT
+[SEQ 31] [Worker-1] [Client-4] received QUIT
+[SEQ 32] [Worker-1] [Client-5] received QUIT
 ```
 
 **Run 3** — `experiment1-sync-w1-verbose-c5-r3`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-10\clients\client-2\output.log
-  SUCCESS: Seat 10 reserved
-  Seat map: Seat 10 : RESERVED by Client-2
-  Consistency check: PASSED
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] waiting for Seat 10
+[SEQ 3] [Worker-1] [Client-2] locked Seat 10
+[SEQ 4] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 5] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 6] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 7] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 8] [Worker-1] [Client-1] received RESERVE 10
+[SEQ 9] [Worker-1] [Client-1] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-1] locked Seat 10
+[SEQ 11] [Worker-1] [Client-1] entering critical section for RESERVE
+[SEQ 12] [Worker-1] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 13] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 14] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 15] [Worker-1] [Client-3] locked Seat 10
+[SEQ 16] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 17] [Worker-1] [Client-3] leaving critical section: RESERVE transaction cancelled
+[SEQ 18] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 19] [Worker-1] [Client-4] waiting for Seat 10
+[SEQ 20] [Worker-1] [Client-4] locked Seat 10
+[SEQ 21] [Worker-1] [Client-4] entering critical section for RESERVE
+[SEQ 22] [Worker-1] [Client-4] leaving critical section: RESERVE transaction cancelled
+[SEQ 23] [Worker-1] [Client-5] received RESERVE 10
+[SEQ 24] [Worker-1] [Client-5] waiting for Seat 10
+[SEQ 25] [Worker-1] [Client-5] locked Seat 10
+[SEQ 26] [Worker-1] [Client-5] entering critical section for RESERVE
+[SEQ 27] [Worker-1] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 28] [Worker-1] [Client-2] received QUIT
+[SEQ 29] [Worker-1] [Client-1] received QUIT
+[SEQ 30] [Worker-1] [Client-3] received QUIT
+[SEQ 31] [Worker-1] [Client-4] received QUIT
+[SEQ 32] [Worker-1] [Client-5] received QUIT
 ```
 
 **IPC หลังจบทุกรอบ:** private reply queues ถูกลบครบ — `key 0x41e82bde msqid 0 used-bytes 0 messages 0`
@@ -149,11 +231,11 @@ Workers 3 ตัวทำงานพร้อมกันโดยไม่ล�
 
 ### Result summary
 
-| Run | Started UTC | Success (RACE) | Rejected | Transport Fail | Clients ที่ได้ SUCCESS | Final owner | Consistency |
+| Run | Started (UTC) | Success (RACE) | Rejected | Transport Fail | Clients ที่ได้ SUCCESS | Final owner | Consistency |
 | ---: | --- | ---: | ---: | ---: | --- | --- | --- |
-| 1 | 2026-10-01T14:39:11.436952193Z | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-1 | FAILED — 1 conflict |
-| 2 | 2026-10-01T14:39:13.135150202Z | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-2 | FAILED — 1 conflict |
-| 3 | 2026-10-01T14:39:14.802144602Z | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-1 | FAILED — 1 conflict |
+| 1 | 01 OCT 2026 14:39:11 | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-1 | FAILED — 1 conflict |
+| 2 | 01 OCT 2026 14:39:13 | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-2 | FAILED — 1 conflict |
+| 3 | 01 OCT 2026 14:39:14 | 3/5 | 2/5 | 0 | Client-1, Client-2, Client-3 | Client-1 | FAILED — 1 conflict |
 
 ### Client-by-client results
 
@@ -166,43 +248,96 @@ Workers 3 ตัวทำงานพร้อมกันโดยไม่ล�
 ### หลักฐาน log (Experiment 2)
 
 **Run 1** — `experiment2-nosync-w3-verbose-c5-r1`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-11\clients\client-1\output.log
-  SUCCESS: Seat 10 reserved
-artifacts\demos\concurrent\2026-10-01_14-39-11\clients\client-2\output.log
-  SUCCESS: Seat 10 reserved
-artifacts\demos\concurrent\2026-10-01_14-39-11\clients\client-3\output.log
-  SUCCESS: Seat 10 reserved
-artifacts\demos\concurrent\2026-10-01_14-39-11\clients\client-4\output.log
-  FAILED: Transaction cancelled because Seat 10 is already reserved
 
-artifacts\demos\concurrent\2026-10-01_14-39-11\seat-conflicts.txt
-  10|Client-1, Client-2, Client-3|Client-1
+Server log:
 
-artifacts\demos\concurrent\2026-10-01_14-39-11\seat-map.txt
-  Seat 10 : RESERVED by Client-1
-
-artifacts\demos\concurrent\2026-10-01_14-39-11\report.txt
-  Successful reservations: 3/5
-  Failed reservations: 2/5
-  Consistency check: FAILED (1 seat conflict detected)
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] checking Seat 10
+[SEQ 3] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 4] [Worker-2] [Client-1] received RESERVE 10
+[SEQ 5] [Worker-2] [Client-1] checking Seat 10
+[SEQ 6] [Worker-2] [Client-1] Seat 10 is AVAILABLE
+[SEQ 7] [Worker-3] [Client-3] received RESERVE 10
+[SEQ 8] [Worker-3] [Client-3] checking Seat 10
+[SEQ 9] [Worker-3] [Client-3] Seat 10 is AVAILABLE
+[SEQ 10] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 11] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 12] [Worker-1] [Client-4] checking Seat 10
+[SEQ 13] [Worker-1] [Client-4] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 14] [Worker-1] [Client-5] received RESERVE 10
+[SEQ 15] [Worker-1] [Client-5] checking Seat 10
+[SEQ 16] [Worker-1] [Client-5] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 17] [Worker-1] [Client-2] received QUIT
+[SEQ 18] [Worker-1] [Client-4] received QUIT
+[SEQ 19] [Worker-1] [Client-5] received QUIT
+[SEQ 20] [Worker-3] [Client-3] Seat 10 reserved
+[SEQ 21] [Worker-1] [Client-3] received QUIT
+[SEQ 22] [Worker-2] [Client-1] Seat 10 reserved
+[SEQ 23] [Worker-3] [Client-1] received QUIT
 ```
 
 > **อ่าน seat-conflicts.txt:** `10|Client-1, Client-2, Client-3|Client-1`  
 > หมายถึง Seat 10 มี 3 clients ได้รับ SUCCESS (Client-1, 2, 3) แต่ seat map บันทึก Client-1 เป็น final owner
 
 **Run 2** — `experiment2-nosync-w3-verbose-c5-r2`
-```
-seat-conflicts.txt: 10|Client-1, Client-2, Client-3|Client-2
-seat-map.txt: Seat 10 : RESERVED by Client-2
-report.txt: Consistency check: FAILED (1 seat conflict detected)
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] checking Seat 10
+[SEQ 3] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 4] [Worker-2] [Client-3] received RESERVE 10
+[SEQ 5] [Worker-2] [Client-3] checking Seat 10
+[SEQ 6] [Worker-2] [Client-3] Seat 10 is AVAILABLE
+[SEQ 7] [Worker-3] [Client-1] received RESERVE 10
+[SEQ 8] [Worker-3] [Client-1] checking Seat 10
+[SEQ 9] [Worker-3] [Client-1] Seat 10 is AVAILABLE
+[SEQ 10] [Worker-2] [Client-3] Seat 10 reserved
+[SEQ 11] [Worker-2] [Client-4] received RESERVE 10
+[SEQ 12] [Worker-2] [Client-4] checking Seat 10
+[SEQ 13] [Worker-2] [Client-4] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 14] [Worker-2] [Client-5] received RESERVE 10
+[SEQ 15] [Worker-2] [Client-5] checking Seat 10
+[SEQ 16] [Worker-2] [Client-5] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 17] [Worker-2] [Client-3] received QUIT
+[SEQ 18] [Worker-2] [Client-4] received QUIT
+[SEQ 19] [Worker-2] [Client-5] received QUIT
+[SEQ 20] [Worker-3] [Client-1] Seat 10 reserved
+[SEQ 21] [Worker-2] [Client-1] received QUIT
+[SEQ 22] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 23] [Worker-3] [Client-2] received QUIT
 ```
 
 **Run 3** — `experiment2-nosync-w3-verbose-c5-r3`
-```
-seat-conflicts.txt: 10|Client-1, Client-2, Client-3|Client-1
-seat-map.txt: Seat 10 : RESERVED by Client-1
-report.txt: Consistency check: FAILED (1 seat conflict detected)
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-3] [Client-1] received RESERVE 10
+[SEQ 3] [Worker-3] [Client-1] checking Seat 10
+[SEQ 4] [Worker-3] [Client-1] Seat 10 is AVAILABLE
+[SEQ 5] [Worker-1] [Client-2] checking Seat 10
+[SEQ 6] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 7] [Worker-2] [Client-3] received RESERVE 10
+[SEQ 8] [Worker-2] [Client-3] checking Seat 10
+[SEQ 9] [Worker-2] [Client-3] Seat 10 is AVAILABLE
+[SEQ 10] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 11] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 12] [Worker-1] [Client-4] checking Seat 10
+[SEQ 13] [Worker-1] [Client-4] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 14] [Worker-1] [Client-5] received RESERVE 10
+[SEQ 15] [Worker-1] [Client-5] checking Seat 10
+[SEQ 16] [Worker-1] [Client-5] RESERVE transaction cancelled: Seat 10 is already reserved
+[SEQ 17] [Worker-1] [Client-4] received QUIT
+[SEQ 18] [Worker-1] [Client-2] received QUIT
+[SEQ 19] [Worker-1] [Client-5] received QUIT
+[SEQ 20] [Worker-2] [Client-3] Seat 10 reserved
+[SEQ 21] [Worker-1] [Client-3] received QUIT
+[SEQ 22] [Worker-3] [Client-1] Seat 10 reserved
+[SEQ 23] [Worker-2] [Client-1] received QUIT
 ```
 
 **สรุป:** เกิด race condition ครบ 3/3 รอบ Client-1, 2, 3 ได้รับ SUCCESS ทุกรอบ แต่ final owner เปลี่ยนตาม thread scheduling (non-deterministic) แสดงให้เห็นว่าการดูเฉพาะ seat map ท้ายรอบไม่เพียงพอ — ต้องตรวจ response ที่แต่ละ client ได้รับด้วย
@@ -230,11 +365,11 @@ report.txt: Consistency check: FAILED (1 seat conflict detected)
 
 ### Result summary
 
-| Run | Started UTC | Success | Rejected | Transport Fail | Final owner | Consistency |
+| Run | Started (UTC) | Success | Rejected | Transport Fail | Final owner | Consistency |
 | ---: | --- | ---: | ---: | ---: | --- | --- |
-| 1 | 2026-10-01T14:39:16.560856575Z | 1/5 | 4/5 | 0 | Client-2 | PASSED |
-| 2 | 2026-10-01T14:39:18.168378780Z | 1/5 | 4/5 | 0 | Client-4 | PASSED |
-| 3 | 2026-10-01T14:39:19.955419239Z | 1/5 | 4/5 | 0 | Client-3 | PASSED |
+| 1 | 01 OCT 2026 14:39:16 | 1/5 | 4/5 | 0 | Client-2 | PASSED |
+| 2 | 01 OCT 2026 14:39:18 | 1/5 | 4/5 | 0 | Client-4 | PASSED |
+| 3 | 01 OCT 2026 14:39:19 | 1/5 | 4/5 | 0 | Client-3 | PASSED |
 
 ### Client-by-client results
 
@@ -247,40 +382,120 @@ report.txt: Consistency check: FAILED (1 seat conflict detected)
 ### หลักฐาน log (Experiment 3)
 
 **Run 1** — `experiment3-sync-w3-verbose-c5-r1`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-16\clients\client-2\output.log
-  SUCCESS: Seat 10 reserved
-artifacts\demos\concurrent\2026-10-01_14-39-16\clients\client-1\output.log
-  FAILED: Transaction cancelled because Seat 10 is already reserved
 
-artifacts\demos\concurrent\2026-10-01_14-39-16\seat-conflicts.txt
-  (empty — ไม่มี conflict)
+Server log:
 
-artifacts\demos\concurrent\2026-10-01_14-39-16\seat-map.txt
-  Seat 10 : RESERVED by Client-2
-
-artifacts\demos\concurrent\2026-10-01_14-39-16\report.txt
-  Successful reservations: 1/5
-  Failed reservations: 4/5
-  Consistency check: PASSED
+```text
+[SEQ 1] [Worker-1] [Client-2] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-2] waiting for Seat 10
+[SEQ 3] [Worker-1] [Client-2] locked Seat 10
+[SEQ 4] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 5] [Worker-1] [Client-2] Seat 10 is AVAILABLE
+[SEQ 6] [Worker-2] [Client-4] received RESERVE 10
+[SEQ 7] [Worker-3] [Client-1] received RESERVE 10
+[SEQ 8] [Worker-2] [Client-4] waiting for Seat 10
+[SEQ 9] [Worker-3] [Client-1] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-2] Seat 10 reserved
+[SEQ 11] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 12] [Worker-2] [Client-4] locked Seat 10
+[SEQ 13] [Worker-2] [Client-4] entering critical section for RESERVE
+[SEQ 14] [Worker-2] [Client-4] leaving critical section: RESERVE transaction cancelled
+[SEQ 15] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 16] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 17] [Worker-3] [Client-1] locked Seat 10
+[SEQ 18] [Worker-3] [Client-1] entering critical section for RESERVE
+[SEQ 19] [Worker-3] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 20] [Worker-2] [Client-5] received RESERVE 10
+[SEQ 21] [Worker-2] [Client-5] waiting for Seat 10
+[SEQ 22] [Worker-1] [Client-3] locked Seat 10
+[SEQ 23] [Worker-3] [Client-2] received QUIT
+[SEQ 24] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 25] [Worker-1] [Client-3] leaving critical section: RESERVE transaction cancelled
+[SEQ 26] [Worker-1] [Client-1] received QUIT
+[SEQ 27] [Worker-2] [Client-5] locked Seat 10
+[SEQ 28] [Worker-2] [Client-5] entering critical section for RESERVE
+[SEQ 29] [Worker-2] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 30] [Worker-1] [Client-3] received QUIT
+[SEQ 31] [Worker-3] [Client-4] received QUIT
+[SEQ 32] [Worker-2] [Client-5] received QUIT
 ```
 
 **Run 2** — `experiment3-sync-w3-verbose-c5-r2`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-18\clients\client-4\output.log
-  SUCCESS: Seat 10 reserved
-seat-map.txt: Seat 10 : RESERVED by Client-4
-seat-conflicts.txt: (empty)
-report.txt: Consistency check: PASSED
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 2] [Worker-2] [Client-5] received RESERVE 10
+[SEQ 3] [Worker-1] [Client-4] waiting for Seat 10
+[SEQ 4] [Worker-1] [Client-4] locked Seat 10
+[SEQ 5] [Worker-1] [Client-4] entering critical section for RESERVE
+[SEQ 6] [Worker-1] [Client-4] Seat 10 is AVAILABLE
+[SEQ 7] [Worker-2] [Client-5] waiting for Seat 10
+[SEQ 8] [Worker-3] [Client-2] received RESERVE 10
+[SEQ 9] [Worker-3] [Client-2] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-4] Seat 10 reserved
+[SEQ 11] [Worker-1] [Client-4] leaving critical section for RESERVE
+[SEQ 12] [Worker-2] [Client-5] locked Seat 10
+[SEQ 13] [Worker-2] [Client-5] entering critical section for RESERVE
+[SEQ 14] [Worker-2] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 15] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 16] [Worker-3] [Client-2] locked Seat 10
+[SEQ 17] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 18] [Worker-2] [Client-1] received RESERVE 10
+[SEQ 19] [Worker-2] [Client-1] waiting for Seat 10
+[SEQ 20] [Worker-3] [Client-2] entering critical section for RESERVE
+[SEQ 21] [Worker-3] [Client-2] leaving critical section: RESERVE transaction cancelled
+[SEQ 22] [Worker-3] [Client-4] received QUIT
+[SEQ 23] [Worker-3] [Client-5] received QUIT
+[SEQ 24] [Worker-1] [Client-3] locked Seat 10
+[SEQ 25] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 26] [Worker-1] [Client-3] leaving critical section: RESERVE transaction cancelled
+[SEQ 27] [Worker-2] [Client-1] locked Seat 10
+[SEQ 28] [Worker-2] [Client-1] entering critical section for RESERVE
+[SEQ 29] [Worker-2] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 30] [Worker-3] [Client-3] received QUIT
+[SEQ 31] [Worker-1] [Client-2] received QUIT
+[SEQ 32] [Worker-2] [Client-1] received QUIT
 ```
 
 **Run 3** — `experiment3-sync-w3-verbose-c5-r3`
-```
-artifacts\demos\concurrent\2026-10-01_14-39-19\clients\client-3\output.log
-  SUCCESS: Seat 10 reserved
-seat-map.txt: Seat 10 : RESERVED by Client-3
-seat-conflicts.txt: (empty)
-report.txt: Consistency check: PASSED
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-3] received RESERVE 10
+[SEQ 2] [Worker-1] [Client-3] waiting for Seat 10
+[SEQ 3] [Worker-1] [Client-3] locked Seat 10
+[SEQ 4] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 5] [Worker-1] [Client-3] Seat 10 is AVAILABLE
+[SEQ 6] [Worker-2] [Client-2] received RESERVE 10
+[SEQ 7] [Worker-2] [Client-2] waiting for Seat 10
+[SEQ 8] [Worker-3] [Client-1] received RESERVE 10
+[SEQ 9] [Worker-3] [Client-1] waiting for Seat 10
+[SEQ 10] [Worker-1] [Client-3] Seat 10 reserved
+[SEQ 11] [Worker-1] [Client-3] leaving critical section for RESERVE
+[SEQ 12] [Worker-2] [Client-2] locked Seat 10
+[SEQ 13] [Worker-2] [Client-2] entering critical section for RESERVE
+[SEQ 14] [Worker-2] [Client-2] leaving critical section: RESERVE transaction cancelled
+[SEQ 15] [Worker-1] [Client-4] received RESERVE 10
+[SEQ 16] [Worker-1] [Client-4] waiting for Seat 10
+[SEQ 17] [Worker-3] [Client-1] locked Seat 10
+[SEQ 18] [Worker-3] [Client-1] entering critical section for RESERVE
+[SEQ 19] [Worker-3] [Client-1] leaving critical section: RESERVE transaction cancelled
+[SEQ 20] [Worker-2] [Client-5] received RESERVE 10
+[SEQ 21] [Worker-2] [Client-5] waiting for Seat 10
+[SEQ 22] [Worker-1] [Client-4] locked Seat 10
+[SEQ 23] [Worker-1] [Client-4] entering critical section for RESERVE
+[SEQ 24] [Worker-1] [Client-4] leaving critical section: RESERVE transaction cancelled
+[SEQ 25] [Worker-3] [Client-3] received QUIT
+[SEQ 26] [Worker-2] [Client-5] locked Seat 10
+[SEQ 27] [Worker-1] [Client-2] received QUIT
+[SEQ 28] [Worker-3] [Client-1] received QUIT
+[SEQ 29] [Worker-2] [Client-5] entering critical section for RESERVE
+[SEQ 30] [Worker-2] [Client-5] leaving critical section: RESERVE transaction cancelled
+[SEQ 31] [Worker-2] [Client-4] received QUIT
+[SEQ 32] [Worker-3] [Client-5] received QUIT
 ```
 
 **สรุป:** ผ่าน 3/3 รอบ ไม่พบ seat conflict ใดๆ แม้มี 3 workers ทำงานพร้อมกัน ผู้ชนะเปลี่ยนในแต่ละรอบ (C2→C4→C3) แตกต่างจาก Experiment 1 ที่ Client-2 ชนะทุกรอบ เพราะ mutex ไม่ lock priority — แค่รับประกันว่ามีเพียงคนเดียวที่สำเร็จ
@@ -317,11 +532,11 @@ report.txt: Consistency check: PASSED
 
 ### Result summary
 
-| Run | Started UTC | Reservations | Failed | Cancellations | Remaining | Consistency |
+| Run | Started (UTC) | Reservations | Failed | Cancellations | Remaining | Consistency |
 | ---: | --- | ---: | ---: | ---: | ---: | --- |
-| 1 | 2026-10-01T14:39:21.550129249Z | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
-| 2 | 2026-10-01T14:39:24.407257109Z | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
-| 3 | 2026-10-01T14:39:27.Z | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
+| 1 | 01 OCT 2026 14:39:21 | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
+| 2 | 01 OCT 2026 14:39:24 | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
+| 3 | 01 OCT 2026 14:39:27 | 10/10 | 0/10 | 5/5 | 5/5 | PASSED |
 
 ### Client results (เหมือนกันทั้ง Run 1, 2 และ 3)
 
@@ -336,45 +551,399 @@ report.txt: Consistency check: PASSED
 ### หลักฐาน log (Demo 1)
 
 **Run 1** — `demo1-sync-w3-verbose-c5-r1`
-```
-artifacts\demos\demo1\2026-10-01_14-39-21\clients\client-1\output.log
-  SUCCESS: Seat 1 reserved
-  SUCCESS: Seat 2 reserved
-  Seat 1 is RESERVED by Client-1
-  SUCCESS: Seat 1 cancelled
-  Seat 2 is RESERVED by Client-1
 
-artifacts\demos\demo1\2026-10-01_14-39-21\clients\client-5\output.log
-  SUCCESS: Seat 9 reserved
-  SUCCESS: Seat 10 reserved
-  SUCCESS: Seat 9 cancelled
-  Seat 10 is RESERVED by Client-5
+Server log:
 
-artifacts\demos\demo1\2026-10-01_14-39-21\seat-map.txt
-  Seat 2 : RESERVED by Client-1
-  Seat 3 : RESERVED by Client-2
-  Seat 6 : RESERVED by Client-3
-  Seat 7 : RESERVED by Client-4
-  Seat 10 : RESERVED by Client-5
-
-artifacts\demos\demo1\2026-10-01_14-39-21\report.txt
-  Successful seat reservations: 10/10
-  Failed seat reservations: 0/10
-  Successful cancellations: 5/5
-  Seats remaining reserved: 5/5
-  Consistency check: PASSED
+```text
+[SEQ 1] [Worker-1] [Client-1] received LIST
+[SEQ 2] [Worker-2] [Client-1] received QUIT
+[SEQ 3] [Worker-3] [Client-1] received STATUS 1
+[SEQ 4] [Worker-1] [Client-1] received QUIT
+[SEQ 5] [Worker-2] [Client-1] received STATUS 2
+[SEQ 6] [Worker-3] [Client-1] received QUIT
+[SEQ 7] [Worker-1] [Client-1] received STATUS 3
+[SEQ 8] [Worker-2] [Client-1] received QUIT
+[SEQ 9] [Worker-3] [Client-1] received STATUS 4
+[SEQ 10] [Worker-1] [Client-1] received QUIT
+[SEQ 11] [Worker-2] [Client-1] received STATUS 5
+[SEQ 12] [Worker-3] [Client-1] received QUIT
+[SEQ 13] [Worker-1] [Client-1] received STATUS 6
+[SEQ 14] [Worker-2] [Client-1] received QUIT
+[SEQ 15] [Worker-3] [Client-1] received STATUS 7
+[SEQ 16] [Worker-1] [Client-1] received QUIT
+[SEQ 17] [Worker-2] [Client-1] received STATUS 8
+[SEQ 18] [Worker-3] [Client-1] received QUIT
+[SEQ 19] [Worker-1] [Client-1] received STATUS 9
+[SEQ 20] [Worker-2] [Client-1] received QUIT
+[SEQ 21] [Worker-3] [Client-1] received STATUS 10
+[SEQ 22] [Worker-1] [Client-1] received QUIT
+[SEQ 23] [Worker-2] [Client-2] received STATUS 3
+[SEQ 24] [Worker-1] [Client-3] received RESERVE 5 6
+[SEQ 25] [Worker-3] [Client-2] received RESERVE 3 4
+[SEQ 26] [Worker-2] [Client-1] received LIST
+[SEQ 27] [Worker-3] [Client-2] waiting for Seat 3
+[SEQ 28] [Worker-3] [Client-2] locked Seat 3
+[SEQ 29] [Worker-3] [Client-2] waiting for Seat 4
+[SEQ 30] [Worker-3] [Client-2] locked Seat 4
+[SEQ 31] [Worker-3] [Client-2] entering critical section for RESERVE
+[SEQ 32] [Worker-3] [Client-2] Seat 3 is AVAILABLE
+[SEQ 33] [Worker-1] [Client-3] waiting for Seat 5
+[SEQ 34] [Worker-1] [Client-3] locked Seat 5
+[SEQ 35] [Worker-1] [Client-3] waiting for Seat 6
+[SEQ 36] [Worker-1] [Client-3] locked Seat 6
+[SEQ 37] [Worker-1] [Client-3] entering critical section for RESERVE
+[SEQ 38] [Worker-1] [Client-3] Seat 5 is AVAILABLE
+[SEQ 39] [Worker-2] [Client-4] received RESERVE 7 8
+[SEQ 40] [Worker-2] [Client-4] waiting for Seat 7
+[SEQ 41] [Worker-2] [Client-4] locked Seat 7
+[SEQ 42] [Worker-2] [Client-4] waiting for Seat 8
+[SEQ 43] [Worker-2] [Client-4] locked Seat 8
+[SEQ 44] [Worker-2] [Client-4] entering critical section for RESERVE
+[SEQ 45] [Worker-2] [Client-4] Seat 7 is AVAILABLE
+[SEQ 46] [Worker-1] [Client-3] Seat 5 reserved
+[SEQ 47] [Worker-1] [Client-3] Seat 6 is AVAILABLE
+[SEQ 48] [Worker-2] [Client-4] Seat 7 reserved
+[SEQ 49] [Worker-2] [Client-4] Seat 8 is AVAILABLE
+[SEQ 50] [Worker-1] [Client-3] Seat 6 reserved
+[SEQ 51] [Worker-1] [Client-3] leaving critical section for RESERVE
+[SEQ 52] [Worker-1] [Client-1] received RESERVE 1 2
+[SEQ 53] [Worker-1] [Client-1] waiting for Seat 1
+[SEQ 54] [Worker-1] [Client-1] locked Seat 1
+[SEQ 55] [Worker-1] [Client-1] waiting for Seat 2
+[SEQ 56] [Worker-1] [Client-1] locked Seat 2
+[SEQ 57] [Worker-1] [Client-1] entering critical section for RESERVE
+[SEQ 58] [Worker-1] [Client-1] Seat 1 is AVAILABLE
+[SEQ 59] [Worker-3] [Client-2] Seat 3 reserved
+[SEQ 60] [Worker-3] [Client-2] Seat 4 is AVAILABLE
+[SEQ 61] [Worker-1] [Client-1] Seat 1 reserved
+[SEQ 62] [Worker-1] [Client-1] Seat 2 is AVAILABLE
+[SEQ 63] [Worker-3] [Client-2] Seat 4 reserved
+[SEQ 64] [Worker-3] [Client-2] leaving critical section for RESERVE
+[SEQ 65] [Worker-3] [Client-5] received LIST
+[SEQ 66] [Worker-2] [Client-4] Seat 8 reserved
+[SEQ 67] [Worker-2] [Client-4] leaving critical section for RESERVE
+[SEQ 68] [Worker-2] [Client-3] received LIST
+[SEQ 69] [Worker-1] [Client-1] Seat 2 reserved
+[SEQ 70] [Worker-1] [Client-1] leaving critical section for RESERVE
+[SEQ 71] [Worker-1] [Client-2] received CANCEL 4
+[SEQ 72] [Worker-1] [Client-2] waiting for Seat 4
+[SEQ 73] [Worker-3] [Client-4] received STATUS 8
+[SEQ 74] [Worker-1] [Client-2] locked Seat 4
+[SEQ 75] [Worker-1] [Client-2] entering critical section for CANCEL
+[SEQ 76] [Worker-1] [Client-2] Seat 4 cancelled
+[SEQ 77] [Worker-1] [Client-2] leaving critical section for CANCEL
+[SEQ 78] [Worker-3] [Client-1] received STATUS 1
+[SEQ 79] [Worker-1] [Client-4] received CANCEL 8
+[SEQ 80] [Worker-1] [Client-4] waiting for Seat 8
+[SEQ 81] [Worker-1] [Client-4] locked Seat 8
+[SEQ 82] [Worker-1] [Client-4] entering critical section for CANCEL
+[SEQ 83] [Worker-1] [Client-4] Seat 8 cancelled
+[SEQ 84] [Worker-1] [Client-4] leaving critical section for CANCEL
+[SEQ 85] [Worker-1] [Client-3] received CANCEL 5
+[SEQ 86] [Worker-1] [Client-3] waiting for Seat 5
+[SEQ 87] [Worker-1] [Client-3] locked Seat 5
+[SEQ 88] [Worker-1] [Client-3] entering critical section for CANCEL
+[SEQ 89] [Worker-1] [Client-3] Seat 5 cancelled
+[SEQ 90] [Worker-1] [Client-3] leaving critical section for CANCEL
+[SEQ 91] [Worker-1] [Client-1] received CANCEL 1
+[SEQ 92] [Worker-1] [Client-1] waiting for Seat 1
+[SEQ 93] [Worker-1] [Client-1] locked Seat 1
+[SEQ 94] [Worker-1] [Client-1] entering critical section for CANCEL
+[SEQ 95] [Worker-1] [Client-1] Seat 1 cancelled
+[SEQ 96] [Worker-1] [Client-1] leaving critical section for CANCEL
+[SEQ 97] [Worker-1] [Client-4] received LIST
+[SEQ 98] [Worker-3] [Client-2] received STATUS 3
+[SEQ 99] [Worker-3] [Client-1] received STATUS 2
+[SEQ 100] [Worker-1] [Client-3] received STATUS 6
+[SEQ 101] [Worker-3] [Client-4] received STATUS 7
+[SEQ 102] [Worker-2] [Client-5] received RESERVE 9 10
+[SEQ 103] [Worker-2] [Client-5] waiting for Seat 9
+[SEQ 104] [Worker-2] [Client-5] locked Seat 9
+[SEQ 105] [Worker-2] [Client-5] waiting for Seat 10
+[SEQ 106] [Worker-1] [Client-1] received QUIT
+[SEQ 107] [Worker-2] [Client-5] locked Seat 10
+[SEQ 108] [Worker-2] [Client-5] entering critical section for RESERVE
+[SEQ 109] [Worker-2] [Client-5] Seat 9 is AVAILABLE
+[SEQ 110] [Worker-3] [Client-2] received LIST
+[SEQ 111] [Worker-1] [Client-3] received QUIT
+[SEQ 112] [Worker-1] [Client-4] received QUIT
+[SEQ 113] [Worker-2] [Client-5] Seat 9 reserved
+[SEQ 114] [Worker-2] [Client-5] Seat 10 is AVAILABLE
+[SEQ 115] [Worker-2] [Client-5] Seat 10 reserved
+[SEQ 116] [Worker-2] [Client-5] leaving critical section for RESERVE
+[SEQ 117] [Worker-1] [Client-5] received CANCEL 9
+[SEQ 118] [Worker-1] [Client-5] waiting for Seat 9
+[SEQ 119] [Worker-1] [Client-5] locked Seat 9
+[SEQ 120] [Worker-1] [Client-5] entering critical section for CANCEL
+[SEQ 121] [Worker-1] [Client-5] Seat 9 cancelled
+[SEQ 122] [Worker-1] [Client-5] leaving critical section for CANCEL
+[SEQ 123] [Worker-2] [Client-2] received QUIT
+[SEQ 124] [Worker-3] [Client-5] received STATUS 10
+[SEQ 125] [Worker-1] [Client-5] received QUIT
 ```
 
 **Run 2** — `demo1-sync-w3-verbose-c5-r2`
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-1] received LIST
+[SEQ 2] [Worker-2] [Client-1] received QUIT
+[SEQ 3] [Worker-3] [Client-1] received STATUS 1
+[SEQ 4] [Worker-1] [Client-1] received QUIT
+[SEQ 5] [Worker-2] [Client-1] received STATUS 2
+[SEQ 6] [Worker-3] [Client-1] received QUIT
+[SEQ 7] [Worker-1] [Client-1] received STATUS 3
+[SEQ 8] [Worker-2] [Client-1] received QUIT
+[SEQ 9] [Worker-3] [Client-1] received STATUS 4
+[SEQ 10] [Worker-1] [Client-1] received QUIT
+[SEQ 11] [Worker-2] [Client-1] received STATUS 5
+[SEQ 12] [Worker-3] [Client-1] received QUIT
+[SEQ 13] [Worker-1] [Client-1] received STATUS 6
+[SEQ 14] [Worker-2] [Client-1] received QUIT
+[SEQ 15] [Worker-3] [Client-1] received STATUS 7
+[SEQ 16] [Worker-1] [Client-1] received QUIT
+[SEQ 17] [Worker-2] [Client-1] received STATUS 8
+[SEQ 18] [Worker-3] [Client-1] received QUIT
+[SEQ 19] [Worker-1] [Client-1] received STATUS 9
+[SEQ 20] [Worker-2] [Client-1] received QUIT
+[SEQ 21] [Worker-3] [Client-1] received STATUS 10
+[SEQ 22] [Worker-1] [Client-1] received QUIT
+[SEQ 23] [Worker-2] [Client-4] received RESERVE 7 8
+[SEQ 24] [Worker-2] [Client-4] waiting for Seat 7
+[SEQ 25] [Worker-2] [Client-4] locked Seat 7
+[SEQ 26] [Worker-2] [Client-4] waiting for Seat 8
+[SEQ 27] [Worker-2] [Client-4] locked Seat 8
+[SEQ 28] [Worker-2] [Client-4] entering critical section for RESERVE
+[SEQ 29] [Worker-2] [Client-4] Seat 7 is AVAILABLE
+[SEQ 30] [Worker-3] [Client-2] received STATUS 3
+[SEQ 31] [Worker-1] [Client-2] received RESERVE 3 4
+[SEQ 32] [Worker-1] [Client-2] waiting for Seat 3
+[SEQ 33] [Worker-1] [Client-2] locked Seat 3
+[SEQ 34] [Worker-1] [Client-2] waiting for Seat 4
+[SEQ 35] [Worker-1] [Client-2] locked Seat 4
+[SEQ 36] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 37] [Worker-1] [Client-2] Seat 3 is AVAILABLE
+[SEQ 38] [Worker-3] [Client-1] received LIST
+[SEQ 39] [Worker-1] [Client-2] Seat 3 reserved
+[SEQ 40] [Worker-1] [Client-2] Seat 4 is AVAILABLE
+[SEQ 41] [Worker-2] [Client-4] Seat 7 reserved
+[SEQ 42] [Worker-2] [Client-4] Seat 8 is AVAILABLE
+[SEQ 43] [Worker-1] [Client-2] Seat 4 reserved
+[SEQ 44] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 45] [Worker-1] [Client-5] received LIST
+[SEQ 46] [Worker-2] [Client-4] Seat 8 reserved
+[SEQ 47] [Worker-2] [Client-4] leaving critical section for RESERVE
+[SEQ 48] [Worker-2] [Client-3] received RESERVE 5 6
+[SEQ 49] [Worker-2] [Client-3] waiting for Seat 5
+[SEQ 50] [Worker-3] [Client-2] received CANCEL 4
+[SEQ 51] [Worker-2] [Client-3] locked Seat 5
+[SEQ 52] [Worker-2] [Client-3] waiting for Seat 6
+[SEQ 53] [Worker-1] [Client-4] received STATUS 8
+[SEQ 54] [Worker-3] [Client-2] waiting for Seat 4
+[SEQ 55] [Worker-3] [Client-2] locked Seat 4
+[SEQ 56] [Worker-3] [Client-2] entering critical section for CANCEL
+[SEQ 57] [Worker-2] [Client-3] locked Seat 6
+[SEQ 58] [Worker-2] [Client-3] entering critical section for RESERVE
+[SEQ 59] [Worker-2] [Client-3] Seat 5 is AVAILABLE
+[SEQ 60] [Worker-3] [Client-2] Seat 4 cancelled
+[SEQ 61] [Worker-3] [Client-2] leaving critical section for CANCEL
+[SEQ 62] [Worker-3] [Client-5] received RESERVE 9 10
+[SEQ 63] [Worker-1] [Client-1] received RESERVE 1 2
+[SEQ 64] [Worker-1] [Client-1] waiting for Seat 1
+[SEQ 65] [Worker-1] [Client-1] locked Seat 1
+[SEQ 66] [Worker-1] [Client-1] waiting for Seat 2
+[SEQ 67] [Worker-1] [Client-1] locked Seat 2
+[SEQ 68] [Worker-1] [Client-1] entering critical section for RESERVE
+[SEQ 69] [Worker-1] [Client-1] Seat 1 is AVAILABLE
+[SEQ 70] [Worker-3] [Client-5] waiting for Seat 9
+[SEQ 71] [Worker-3] [Client-5] locked Seat 9
+[SEQ 72] [Worker-3] [Client-5] waiting for Seat 10
+[SEQ 73] [Worker-3] [Client-5] locked Seat 10
+[SEQ 74] [Worker-3] [Client-5] entering critical section for RESERVE
+[SEQ 75] [Worker-3] [Client-5] Seat 9 is AVAILABLE
+[SEQ 76] [Worker-2] [Client-3] Seat 5 reserved
+[SEQ 77] [Worker-2] [Client-3] Seat 6 is AVAILABLE
+[SEQ 78] [Worker-1] [Client-1] Seat 1 reserved
+[SEQ 79] [Worker-1] [Client-1] Seat 2 is AVAILABLE
+[SEQ 80] [Worker-3] [Client-5] Seat 9 reserved
+[SEQ 81] [Worker-3] [Client-5] Seat 10 is AVAILABLE
+[SEQ 82] [Worker-1] [Client-1] Seat 2 reserved
+[SEQ 83] [Worker-1] [Client-1] leaving critical section for RESERVE
+[SEQ 84] [Worker-1] [Client-4] received CANCEL 8
+[SEQ 85] [Worker-1] [Client-4] waiting for Seat 8
+[SEQ 86] [Worker-1] [Client-4] locked Seat 8
+[SEQ 87] [Worker-1] [Client-4] entering critical section for CANCEL
+[SEQ 88] [Worker-1] [Client-4] Seat 8 cancelled
+[SEQ 89] [Worker-1] [Client-4] leaving critical section for CANCEL
+[SEQ 90] [Worker-1] [Client-2] received STATUS 3
+[SEQ 91] [Worker-1] [Client-1] received STATUS 1
+[SEQ 92] [Worker-1] [Client-2] received LIST
+[SEQ 93] [Worker-2] [Client-3] Seat 6 reserved
+[SEQ 94] [Worker-2] [Client-3] leaving critical section for RESERVE
+[SEQ 95] [Worker-2] [Client-4] received LIST
+[SEQ 96] [Worker-3] [Client-5] Seat 10 reserved
+[SEQ 97] [Worker-3] [Client-5] leaving critical section for RESERVE
+[SEQ 98] [Worker-3] [Client-1] received CANCEL 1
+[SEQ 99] [Worker-3] [Client-1] waiting for Seat 1
+[SEQ 100] [Worker-3] [Client-1] locked Seat 1
+[SEQ 101] [Worker-3] [Client-1] entering critical section for CANCEL
+[SEQ 102] [Worker-3] [Client-1] Seat 1 cancelled
+[SEQ 103] [Worker-3] [Client-1] leaving critical section for CANCEL
+[SEQ 104] [Worker-2] [Client-2] received QUIT
+[SEQ 105] [Worker-3] [Client-5] received CANCEL 9
+[SEQ 106] [Worker-3] [Client-5] waiting for Seat 9
+[SEQ 107] [Worker-3] [Client-5] locked Seat 9
+[SEQ 108] [Worker-3] [Client-5] entering critical section for CANCEL
+[SEQ 109] [Worker-3] [Client-5] Seat 9 cancelled
+[SEQ 110] [Worker-3] [Client-5] leaving critical section for CANCEL
+[SEQ 111] [Worker-1] [Client-3] received LIST
+[SEQ 112] [Worker-2] [Client-4] received STATUS 7
+[SEQ 113] [Worker-3] [Client-1] received STATUS 2
+[SEQ 114] [Worker-1] [Client-3] received CANCEL 5
+[SEQ 115] [Worker-1] [Client-3] waiting for Seat 5
+[SEQ 116] [Worker-1] [Client-3] locked Seat 5
+[SEQ 117] [Worker-1] [Client-3] entering critical section for CANCEL
+[SEQ 118] [Worker-1] [Client-3] Seat 5 cancelled
+[SEQ 119] [Worker-1] [Client-3] leaving critical section for CANCEL
+[SEQ 120] [Worker-3] [Client-5] received STATUS 10
+[SEQ 121] [Worker-3] [Client-4] received QUIT
+[SEQ 122] [Worker-3] [Client-3] received STATUS 6
+[SEQ 123] [Worker-3] [Client-5] received QUIT
+[SEQ 124] [Worker-2] [Client-1] received QUIT
+[SEQ 125] [Worker-3] [Client-3] received QUIT
 ```
-artifacts\demos\demo1\2026-10-01_14-39-24\report.txt
-  Successful seat reservations: 10/10
-  Failed seat reservations: 0/10
-  Successful cancellations: 5/5
-  Seats remaining reserved: 5/5
-  Consistency check: PASSED
-  
-seat-map.txt: Seat 2:C1, 3:C2, 6:C3, 7:C4, 10:C5 (ตรงทุก run)
+
+**Run 3** — `demo1-sync-w3-verbose-c5-r3`
+
+Server log:
+
+```text
+[SEQ 1] [Worker-1] [Client-1] received LIST
+[SEQ 2] [Worker-2] [Client-1] received QUIT
+[SEQ 3] [Worker-3] [Client-1] received STATUS 1
+[SEQ 4] [Worker-1] [Client-1] received QUIT
+[SEQ 5] [Worker-2] [Client-1] received STATUS 2
+[SEQ 6] [Worker-3] [Client-1] received QUIT
+[SEQ 7] [Worker-1] [Client-1] received STATUS 3
+[SEQ 8] [Worker-2] [Client-1] received QUIT
+[SEQ 9] [Worker-3] [Client-1] received STATUS 4
+[SEQ 10] [Worker-1] [Client-1] received QUIT
+[SEQ 11] [Worker-2] [Client-1] received STATUS 5
+[SEQ 12] [Worker-3] [Client-1] received QUIT
+[SEQ 13] [Worker-1] [Client-1] received STATUS 6
+[SEQ 14] [Worker-2] [Client-1] received QUIT
+[SEQ 15] [Worker-3] [Client-1] received STATUS 7
+[SEQ 16] [Worker-1] [Client-1] received QUIT
+[SEQ 17] [Worker-2] [Client-1] received STATUS 8
+[SEQ 18] [Worker-3] [Client-1] received QUIT
+[SEQ 19] [Worker-1] [Client-1] received STATUS 9
+[SEQ 20] [Worker-2] [Client-1] received QUIT
+[SEQ 21] [Worker-3] [Client-1] received STATUS 10
+[SEQ 22] [Worker-1] [Client-1] received QUIT
+[SEQ 23] [Worker-2] [Client-3] received RESERVE 5 6
+[SEQ 24] [Worker-2] [Client-3] waiting for Seat 5
+[SEQ 25] [Worker-2] [Client-3] locked Seat 5
+[SEQ 26] [Worker-2] [Client-3] waiting for Seat 6
+[SEQ 27] [Worker-2] [Client-3] locked Seat 6
+[SEQ 28] [Worker-2] [Client-3] entering critical section for RESERVE
+[SEQ 29] [Worker-2] [Client-3] Seat 5 is AVAILABLE
+[SEQ 30] [Worker-1] [Client-1] received LIST
+[SEQ 31] [Worker-3] [Client-4] received RESERVE 7 8
+[SEQ 32] [Worker-3] [Client-4] waiting for Seat 7
+[SEQ 33] [Worker-3] [Client-4] locked Seat 7
+[SEQ 34] [Worker-3] [Client-4] waiting for Seat 8
+[SEQ 35] [Worker-3] [Client-4] locked Seat 8
+[SEQ 36] [Worker-3] [Client-4] entering critical section for RESERVE
+[SEQ 37] [Worker-3] [Client-4] Seat 7 is AVAILABLE
+[SEQ 38] [Worker-2] [Client-3] Seat 5 reserved
+[SEQ 39] [Worker-2] [Client-3] Seat 6 is AVAILABLE
+[SEQ 40] [Worker-3] [Client-4] Seat 7 reserved
+[SEQ 41] [Worker-3] [Client-4] Seat 8 is AVAILABLE
+[SEQ 42] [Worker-3] [Client-4] Seat 8 reserved
+[SEQ 43] [Worker-3] [Client-4] leaving critical section for RESERVE
+[SEQ 44] [Worker-3] [Client-5] received LIST
+[SEQ 45] [Worker-2] [Client-3] Seat 6 reserved
+[SEQ 46] [Worker-2] [Client-3] leaving critical section for RESERVE
+[SEQ 47] [Worker-2] [Client-2] received STATUS 3
+[SEQ 48] [Worker-1] [Client-4] received STATUS 8
+[SEQ 49] [Worker-2] [Client-3] received LIST
+[SEQ 50] [Worker-1] [Client-2] received RESERVE 3 4
+[SEQ 51] [Worker-1] [Client-2] waiting for Seat 3
+[SEQ 52] [Worker-1] [Client-2] locked Seat 3
+[SEQ 53] [Worker-1] [Client-2] waiting for Seat 4
+[SEQ 54] [Worker-1] [Client-2] locked Seat 4
+[SEQ 55] [Worker-1] [Client-2] entering critical section for RESERVE
+[SEQ 56] [Worker-1] [Client-2] Seat 3 is AVAILABLE
+[SEQ 57] [Worker-3] [Client-5] received RESERVE 9 10
+[SEQ 58] [Worker-3] [Client-5] waiting for Seat 9
+[SEQ 59] [Worker-3] [Client-5] locked Seat 9
+[SEQ 60] [Worker-3] [Client-5] waiting for Seat 10
+[SEQ 61] [Worker-3] [Client-5] locked Seat 10
+[SEQ 62] [Worker-3] [Client-5] entering critical section for RESERVE
+[SEQ 63] [Worker-3] [Client-5] Seat 9 is AVAILABLE
+[SEQ 64] [Worker-2] [Client-1] received RESERVE 1 2
+[SEQ 65] [Worker-2] [Client-1] waiting for Seat 1
+[SEQ 66] [Worker-2] [Client-1] locked Seat 1
+[SEQ 67] [Worker-2] [Client-1] waiting for Seat 2
+[SEQ 68] [Worker-2] [Client-1] locked Seat 2
+[SEQ 69] [Worker-2] [Client-1] entering critical section for RESERVE
+[SEQ 70] [Worker-2] [Client-1] Seat 1 is AVAILABLE
+[SEQ 71] [Worker-3] [Client-5] Seat 9 reserved
+[SEQ 72] [Worker-3] [Client-5] Seat 10 is AVAILABLE
+[SEQ 73] [Worker-1] [Client-2] Seat 3 reserved
+[SEQ 74] [Worker-1] [Client-2] Seat 4 is AVAILABLE
+[SEQ 75] [Worker-3] [Client-5] Seat 10 reserved
+[SEQ 76] [Worker-3] [Client-5] leaving critical section for RESERVE
+[SEQ 77] [Worker-3] [Client-4] received CANCEL 8
+[SEQ 78] [Worker-3] [Client-4] waiting for Seat 8
+[SEQ 79] [Worker-3] [Client-4] locked Seat 8
+[SEQ 80] [Worker-3] [Client-4] entering critical section for CANCEL
+[SEQ 81] [Worker-3] [Client-4] Seat 8 cancelled
+[SEQ 82] [Worker-3] [Client-4] leaving critical section for CANCEL
+[SEQ 83] [Worker-3] [Client-3] received CANCEL 5
+[SEQ 84] [Worker-3] [Client-3] waiting for Seat 5
+[SEQ 85] [Worker-3] [Client-3] locked Seat 5
+[SEQ 86] [Worker-3] [Client-3] entering critical section for CANCEL
+[SEQ 87] [Worker-3] [Client-3] Seat 5 cancelled
+[SEQ 88] [Worker-3] [Client-3] leaving critical section for CANCEL
+[SEQ 89] [Worker-3] [Client-5] received CANCEL 9
+[SEQ 90] [Worker-3] [Client-5] waiting for Seat 9
+[SEQ 91] [Worker-3] [Client-5] locked Seat 9
+[SEQ 92] [Worker-3] [Client-5] entering critical section for CANCEL
+[SEQ 93] [Worker-3] [Client-5] Seat 9 cancelled
+[SEQ 94] [Worker-3] [Client-5] leaving critical section for CANCEL
+[SEQ 95] [Worker-3] [Client-4] received LIST
+[SEQ 96] [Worker-2] [Client-1] Seat 1 reserved
+[SEQ 97] [Worker-2] [Client-1] Seat 2 is AVAILABLE
+[SEQ 98] [Worker-2] [Client-1] Seat 2 reserved
+[SEQ 99] [Worker-2] [Client-1] leaving critical section for RESERVE
+[SEQ 100] [Worker-2] [Client-3] received STATUS 6
+[SEQ 101] [Worker-2] [Client-5] received STATUS 10
+[SEQ 102] [Worker-2] [Client-3] received QUIT
+[SEQ 103] [Worker-2] [Client-1] received STATUS 1
+[SEQ 104] [Worker-1] [Client-2] Seat 4 reserved
+[SEQ 105] [Worker-1] [Client-2] leaving critical section for RESERVE
+[SEQ 106] [Worker-1] [Client-5] received QUIT
+[SEQ 107] [Worker-1] [Client-2] received CANCEL 4
+[SEQ 108] [Worker-1] [Client-2] waiting for Seat 4
+[SEQ 109] [Worker-1] [Client-2] locked Seat 4
+[SEQ 110] [Worker-1] [Client-2] entering critical section for CANCEL
+[SEQ 111] [Worker-1] [Client-2] Seat 4 cancelled
+[SEQ 112] [Worker-1] [Client-2] leaving critical section for CANCEL
+[SEQ 113] [Worker-3] [Client-4] received STATUS 7
+[SEQ 114] [Worker-1] [Client-2] received STATUS 3
+[SEQ 115] [Worker-1] [Client-4] received QUIT
+[SEQ 116] [Worker-2] [Client-1] received CANCEL 1
+[SEQ 117] [Worker-2] [Client-1] waiting for Seat 1
+[SEQ 118] [Worker-2] [Client-1] locked Seat 1
+[SEQ 119] [Worker-2] [Client-1] entering critical section for CANCEL
+[SEQ 120] [Worker-2] [Client-1] Seat 1 cancelled
+[SEQ 121] [Worker-2] [Client-1] leaving critical section for CANCEL
+[SEQ 122] [Worker-2] [Client-2] received LIST
+[SEQ 123] [Worker-2] [Client-1] received STATUS 2
+[SEQ 124] [Worker-3] [Client-2] received QUIT
+[SEQ 125] [Worker-1] [Client-1] received QUIT
 ```
 
 **สรุป:** Demo 1 ผ่านครบ 3/3 รอบ ทุก operation สำเร็จ final state ตรงตาม command plan ทุก client และไม่มี seat conflict
@@ -398,5 +967,3 @@ seat-map.txt: Seat 2:C1, 3:C2, 6:C3, 7:C4, 10:C5 (ตรงทุก run)
 4. **Seat map ไม่เพียงพอสำหรับตรวจ race** — Experiment 2 seat map บันทึก 1 owner แต่ 3 clients ได้ SUCCESS ต้องอ่าน client output + seat-conflicts.txt ร่วมด้วย
 
 ---
-
-*หลักฐานเพิ่มเติม: `docs/evidence/2026-10-01/experiment-transcripts.txt` | สภาพแวดล้อม: `docs/evidence/2026-10-01/environment.json`*
