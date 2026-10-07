@@ -38,6 +38,43 @@ if grep -q '^compose ' "$MOCK_TRACE"; then
 fi
 echo "[PASS] Docker commands survive an executable path containing spaces"
 
+experiment_trace="$TEST_DIR/experiment-docker-calls.log"
+experiment_output="$TEST_DIR/experiment-output.log"
+MOCK_TRACE="$experiment_trace" \
+  bash "$ROOT_DIR/scripts/experiments/demo.sh" >"$experiment_output"
+for id in {1..5}; do
+  grep -Fqx "exec -i airplane-reservation ./client $id" "$experiment_trace" ||
+    fail "experiment demo did not launch Client-$id"
+  grep -Fq "Client-$id | SUCCESS: Seat 10 reserved" "$experiment_output" ||
+    fail "experiment demo did not send RESERVE 10 from Client-$id"
+done
+[ "$(wc -l <"$experiment_trace")" -eq 5 ] ||
+  fail "experiment demo ran Docker commands other than its five clients"
+grep -Fqx 'Summary  : 5 successful, 0 rejected, 0 errors' "$experiment_output" ||
+  fail "experiment demo did not summarize successful clients"
+grep -Fq 'race observed' "$experiment_output" ||
+  fail "experiment demo did not flag multiple successful reservations"
+echo "[PASS] experiment demo launches only five concurrent reservation clients"
+
+MOCK_RESERVE_WIN_CLIENT=client-2 bash "$ROOT_DIR/scripts/experiments/demo.sh" \
+  >"$TEST_DIR/experiment-single-winner.log"
+grep -Fqx 'Client-2 : SUCCESS' "$TEST_DIR/experiment-single-winner.log" ||
+  fail "experiment demo did not identify the winning client"
+grep -Fqx 'Summary  : 1 successful, 4 rejected, 0 errors' "$TEST_DIR/experiment-single-winner.log" ||
+  fail "experiment demo did not summarize rejected clients"
+echo "[PASS] experiment demo reports a single winner and four rejections"
+
+if MOCK_FAIL=client-3 bash "$ROOT_DIR/scripts/experiments/demo.sh" \
+  >"$TEST_DIR/experiment-client-failure.log" 2>&1; then
+  fail "experiment demo ignored a failed client"
+fi
+grep -Fqx 'Client-3 : ERROR (client process failed)' "$TEST_DIR/experiment-client-failure.log" ||
+  fail "experiment demo did not report a failed client"
+grep -Fqx 'Observation: incomplete result because one or more clients failed.' \
+  "$TEST_DIR/experiment-client-failure.log" ||
+  fail "experiment demo reported a conclusive result after a client failure"
+echo "[PASS] experiment demo propagates client failures"
+
 removal_polls="$TEST_DIR/removal-polls.txt"
 printf '2\n' >"$removal_polls"
 MOCK_REMOVAL_POLLS_FILE="$removal_polls" \
@@ -194,4 +231,4 @@ grep -Fqx 'Client 1 commands: LIST → RESERVE 1 2 → STATUS 1 → CANCEL 1 →
 grep -Fqx 'Client 5 commands: LIST → RESERVE 9 10 → CANCEL 9 → STATUS 10 → QUIT' "$demo_report" ||
   fail "Demo 1 report did not record Client 5's command sequence"
 echo "[PASS] Demo 1 report includes reservation and cancellation totals"
-echo "Script tests: 19 passed, 0 failed (mock Docker transport)"
+echo "Script tests: 22 passed, 0 failed (mock Docker transport)"

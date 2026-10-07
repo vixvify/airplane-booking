@@ -186,6 +186,14 @@ PowerShell:
 
 ใช้ 3 workers กับ per-seat mutex จึงควรมีผู้จอง Seat 10 สำเร็จเพียงหนึ่งราย
 
+ถ้าเปิด server ของ Experiment 1, 2 หรือ 3 ไว้แล้ว และต้องการส่ง `RESERVE 10` จาก Client 1–5 พร้อมกันโดยไม่จัดการ server ใช้สคริปต์เดียวกันแทน `concurrent-test.sh`:
+
+```bash
+bash scripts/experiments/demo.sh
+```
+
+สคริปต์แสดงผลของแต่ละ client พร้อมสรุปจำนวนสำเร็จ/ถูกปฏิเสธ/ผิดพลาด และเตือนเมื่อมีหลาย client จองที่นั่งเดียวกันสำเร็จ โดยไม่บันทึก report เป็นไฟล์ ผลที่ได้ขึ้นกับโหมด server ที่เปิดไว้ก่อนรัน หากจะทดลองซ้ำให้เริ่ม server ใหม่เพื่อรีเซ็ตสถานะที่นั่ง เลือกที่นั่งอื่นได้ด้วย `SEAT_ID=7 bash scripts/experiments/demo.sh`
+
 กำหนดค่าของ concurrent test เองได้ด้วย environment variables:
 
 ```bash
