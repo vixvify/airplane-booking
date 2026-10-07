@@ -135,14 +135,6 @@ prompt_number() {
   fi
 }
 
-adjust_number() {
-  local current="$1" delta="$2" minimum="$3" maximum="$4" next
-  next=$((current + delta))
-  [ "$next" -lt "$minimum" ] && next="$minimum"
-  [ "$next" -gt "$maximum" ] && next="$maximum"
-  ADJUSTED="$next"
-}
-
 toggle() {
   if [ "$1" = yes ]; then TOGGLED=no; else TOGGLED=yes; fi
 }
@@ -161,14 +153,15 @@ cycle_value() {
 }
 
 prepare_server() {
-  local experiment="$1" workers="$2" log_mode="$3" rebuild="$4"
+  local experiment="$1" workers="$2" log_mode="$3" rebuild="$4" race_delay="${5:-on}"
   if [ "$rebuild" = yes ]; then
     bash "$CONTAINER_SCRIPT" build || return 1
   fi
   if bash "$CONTAINER_SCRIPT" status >/dev/null 2>&1; then
     bash "$CONTAINER_SCRIPT" stop || return 1
   fi
-  AIRPLANE_LOG_MODE="$log_mode" bash "$CONTAINER_SCRIPT" start "$experiment" "$workers"
+  AIRPLANE_LOG_MODE="$log_mode" AIRPLANE_RACE_DELAY="$race_delay" \
+    bash "$CONTAINER_SCRIPT" start "$experiment" "$workers"
 }
 
 run_task() {
@@ -206,18 +199,18 @@ run_task() {
 
 run_load() {
   local experiment="$1" workers="$2" requests="$3" concurrency="$4"
-  local operation="$5" seat_mode="$6" seat="$7" log_mode="$8" rebuild="$9"
+  local seat_mode="$5" seat="$6" log_mode="$7" rebuild="$8"
   invalidate_frame
   begin_output_screen
   echo "============================================================"
   echo "Starting load test..."
   echo "============================================================"
   echo
-  if prepare_server "$experiment" "$workers" "$log_mode" "$rebuild"; then
+  if prepare_server "$experiment" "$workers" "$log_mode" "$rebuild" off; then
     if [ "$seat_mode" = round-robin ]; then
-      bash "$ROOT_DIR/scripts/load-test.sh" "$requests" "$concurrency" "$operation"
+      bash "$ROOT_DIR/scripts/load-test.sh" "$requests" "$concurrency"
     else
-      bash "$ROOT_DIR/scripts/load-test.sh" "$requests" "$concurrency" "$operation" "$seat"
+      bash "$ROOT_DIR/scripts/load-test.sh" "$requests" "$concurrency" "$seat"
     fi
     status=$?
   else
@@ -264,7 +257,7 @@ task_form() {
       fi
     done
     line
-    row "Arrow keys: navigate/change | Enter: edit/run | Esc: back | Q: quit"
+    row "Up/Down: move | L/R: choices | Enter: type/run | Esc: back | Q: quit"
     line
     render_frame
     read_key
@@ -276,16 +269,13 @@ task_form() {
         kind="${kinds[SELECTED]}"
         case "$kind" in
           workers)
-            if [ "$KEY" = enter ]; then prompt_number "Workers (1-64)" "$workers" 1 64; workers="$PROMPT_RESULT"
-            else adjust_number "$workers" "$direction" 1 64; workers="$ADJUSTED"; fi ;;
+            if [ "$KEY" = enter ]; then prompt_number "Workers (1-64)" "$workers" 1 64; workers="$PROMPT_RESULT"; fi ;;
           clients)
-            if [ "$KEY" = enter ]; then prompt_number "Clients (5-100)" "$clients" 5 100; clients="$PROMPT_RESULT"
-            else adjust_number "$clients" "$direction" 5 100; clients="$ADJUSTED"; fi ;;
+            if [ "$KEY" = enter ]; then prompt_number "Clients (5-100)" "$clients" 5 100; clients="$PROMPT_RESULT"; fi ;;
           command) cycle_value "$command" "$direction" RESERVE CANCEL STATUS LIST; command="$CYCLED" ;;
           seat)
             if [ "$command" != LIST ]; then
-              if [ "$KEY" = enter ]; then prompt_number "Seat (1-20)" "$seat" 1 20; seat="$PROMPT_RESULT"
-              else adjust_number "$seat" "$direction" 1 20; seat="$ADJUSTED"; fi
+              if [ "$KEY" = enter ]; then prompt_number "Seat (1-20)" "$seat" 1 20; seat="$PROMPT_RESULT"; fi
             fi ;;
           logs) cycle_value "$log_mode" "$direction" verbose quiet; log_mode="$CYCLED" ;;
           build) toggle "$rebuild"; rebuild="$TOGGLED" ;;
@@ -299,15 +289,15 @@ task_form() {
 
 load_form() {
   local experiment=sync workers=3 requests=50000 concurrency=100
-  local operation=STATUS seat_mode=round-robin seat=10 log_mode=quiet rebuild=yes
+  local seat_mode=round-robin seat=10 log_mode=quiet rebuild=yes
   SELECTED=0
   while true; do
     title
     row "Load Test - Logical clients and performance metrics"
     line
-    labels=("Server mode" "Workers" "Total requests" "Concurrency / logical clients" "Operation" "Seat selection" "Target seat" "Server logs" "Build image first" "RUN")
-    values=("$experiment" "$workers" "$requests" "$concurrency" "$operation" "$seat_mode" "$seat" "$log_mode" "$rebuild" "Start server and execute")
-    kinds=(experiment workers requests concurrency operation seat_mode seat logs build run)
+    labels=("Server mode" "Workers" "Total requests" "Concurrency / logical clients" "Seat selection" "Target seat" "Server logs" "Build image first" "RUN")
+    values=("$experiment" "$workers" "$requests" "$concurrency" "$seat_mode" "$seat" "$log_mode" "$rebuild" "Start server and execute")
+    kinds=(experiment workers requests concurrency seat_mode seat logs build run)
     for index in "${!labels[@]}"; do
       if [ "${kinds[index]}" = seat ] && [ "$seat_mode" = round-robin ]; then
         option "$index" "${labels[index]}: disabled"
@@ -315,8 +305,10 @@ load_form() {
         option "$index" "${labels[index]}: ${values[index]}"
       fi
     done
+    row "Workload: MIXED (RESERVE + CANCEL) | Race delay: off (Load Test only)"
+    row "Concurrency = client threads; actual overlap = Peak In-Flight"
     line
-    row "Arrow keys: navigate/change | Enter: edit/run | Esc: back | Q: quit"
+    row "Up/Down: move | L/R: choices | Enter: type/run | Esc: back | Q: quit"
     line
     render_frame
     read_key
@@ -332,25 +324,20 @@ load_form() {
             if [ "$experiment" = sequential ]; then workers=1; elif [ "$workers" -eq 1 ]; then workers=3; fi ;;
           workers)
             if [ "$experiment" = sequential ]; then workers=1
-            elif [ "$KEY" = enter ]; then prompt_number "Workers (1-64)" "$workers" 1 64; workers="$PROMPT_RESULT"
-            else adjust_number "$workers" "$direction" 1 64; workers="$ADJUSTED"; fi ;;
+            elif [ "$KEY" = enter ]; then prompt_number "Workers (1-64)" "$workers" 1 64; workers="$PROMPT_RESULT"; fi ;;
           requests)
-            if [ "$KEY" = enter ]; then prompt_number "Total requests" "$requests" 1 2147473647; requests="$PROMPT_RESULT"
-            else adjust_number "$requests" "$((direction * 100000))" 1 2147473647; requests="$ADJUSTED"; fi
+            if [ "$KEY" = enter ]; then prompt_number "Total requests" "$requests" 1 2147473647; requests="$PROMPT_RESULT"; fi
             [ "$concurrency" -gt "$requests" ] && concurrency="$requests" ;;
           concurrency)
-            if [ "$KEY" = enter ]; then prompt_number "Concurrency / logical clients" "$concurrency" 1 "$requests"; concurrency="$PROMPT_RESULT"
-            else adjust_number "$concurrency" "$((direction * 10))" 1 "$requests"; concurrency="$ADJUSTED"; fi ;;
-          operation) cycle_value "$operation" "$direction" STATUS RESERVE CANCEL; operation="$CYCLED" ;;
+            if [ "$KEY" = enter ]; then prompt_number "Concurrency / logical clients" "$concurrency" 1 "$requests"; concurrency="$PROMPT_RESULT"; fi ;;
           seat_mode) cycle_value "$seat_mode" "$direction" round-robin fixed; seat_mode="$CYCLED" ;;
           seat)
             if [ "$seat_mode" = fixed ]; then
-              if [ "$KEY" = enter ]; then prompt_number "Seat (1-20)" "$seat" 1 20; seat="$PROMPT_RESULT"
-              else adjust_number "$seat" "$direction" 1 20; seat="$ADJUSTED"; fi
+              if [ "$KEY" = enter ]; then prompt_number "Seat (1-20)" "$seat" 1 20; seat="$PROMPT_RESULT"; fi
             fi ;;
           logs) cycle_value "$log_mode" "$direction" verbose quiet; log_mode="$CYCLED" ;;
           build) toggle "$rebuild"; rebuild="$TOGGLED" ;;
-          run) [ "$KEY" = enter ] && run_load "$experiment" "$workers" "$requests" "$concurrency" "$operation" "$seat_mode" "$seat" "$log_mode" "$rebuild" ;;
+          run) [ "$KEY" = enter ] && run_load "$experiment" "$workers" "$requests" "$concurrency" "$seat_mode" "$seat" "$log_mode" "$rebuild" ;;
         esac ;;
       back) return ;;
       quit) exit 0 ;;

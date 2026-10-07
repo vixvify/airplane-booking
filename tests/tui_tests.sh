@@ -119,17 +119,20 @@ else
 fi
 assert_contains "$OUTPUT" 'Load Test - Logical clients and performance metrics' 'Load Test form is rendered'
 assert_contains "$OUTPUT" 'Total requests: 50000' 'Load Test defaults are rendered'
+assert_contains "$OUTPUT" 'Workload: MIXED (RESERVE + CANCEL) | Race delay: off (Load Test only)' 'Load Test uses mixed workload and disables race delay'
+assert_contains "$OUTPUT" 'Concurrency = client threads; actual overlap = Peak In-Flight' 'Load Test explains concurrency'
+assert_not_contains "$OUTPUT" 'Operation: STATUS' 'Load Test does not offer an operation selector'
 assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'Navigation does not clear the full screen'
 assert_count "$OUTPUT" 1 'AIRPLANE RESERVATION - TERMINAL CONTROL PANEL' 'Navigation does not redraw the unchanged header'
 
 OUTPUT="$TEST_DIR/exp2-settings.raw"
-if run_menu "${DOWN}\n${RIGHT}${DOWN}${RIGHT}q" "$OUTPUT"; then
-  pass 'Exp2 settings accept navigation input'
+if run_menu "${DOWN}\n\n7\n${DOWN}\n12\nq" "$OUTPUT"; then
+  pass 'Exp2 settings accept typed numbers'
 else
-  fail 'Exp2 settings accept navigation input'
+  fail 'Exp2 settings accept typed numbers'
 fi
-assert_contains "$OUTPUT" 'Workers: 4' 'Exp2 worker count can be changed'
-assert_contains "$OUTPUT" 'Clients: 6' 'Exp2 client count can be changed'
+assert_contains "$OUTPUT" 'Workers: 7' 'Exp2 worker count can be typed'
+assert_contains "$OUTPUT" 'Clients: 12' 'Exp2 client count can be typed'
 assert_count "$OUTPUT" 1 'AIRPLANE RESERVATION - TERMINAL CONTROL PANEL' 'Editing values does not redraw the unchanged header'
 
 OUTPUT="$TEST_DIR/command-selection.raw"
@@ -145,13 +148,33 @@ assert_contains "$OUTPUT" 'Command: LIST' 'Experiment command can select LIST'
 assert_contains "$OUTPUT" 'Target seat: disabled' 'LIST disables the unused target seat'
 assert_count "$OUTPUT" 1 "$CLEAR_FRAME" 'Command selection uses incremental rendering'
 
-OUTPUT="$TEST_DIR/load-request-step.raw"
-if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}${RIGHT}q" "$OUTPUT"; then
-  pass 'Load Test total requests accepts arrow input'
+OUTPUT="$TEST_DIR/load-request-entry.raw"
+if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}\n123456\nq" "$OUTPUT"; then
+  pass 'Load Test total requests accepts typed input'
 else
-  fail 'Load Test total requests accepts arrow input'
+  fail 'Load Test total requests accepts typed input'
 fi
-assert_contains "$OUTPUT" 'Total requests: 150000' 'Load Test total requests increases by 100,000'
+assert_contains "$OUTPUT" 'Total requests: 123456' 'Load Test total requests uses the entered value'
+
+OUTPUT="$TEST_DIR/load-concurrency-entry.raw"
+if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}${DOWN}\n37\nq" "$OUTPUT"; then
+  pass 'Load Test concurrency accepts typed input'
+else
+  fail 'Load Test concurrency accepts typed input'
+fi
+assert_contains "$OUTPUT" 'Concurrency / logical clients: 37' 'Load Test concurrency uses the entered value'
+
+OUTPUT="$TEST_DIR/load-seat-entry.raw"
+if run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}${DOWN}${DOWN}${RIGHT}${DOWN}\n17\nq" "$OUTPUT"; then
+  pass 'Load Test target seat accepts typed input'
+else
+  fail 'Load Test target seat accepts typed input'
+fi
+assert_contains "$OUTPUT" 'Target seat: 17' 'Load Test target seat uses the entered value'
+
+OUTPUT="$TEST_DIR/load-no-arrow-step.raw"
+run_menu "${DOWN}${DOWN}${DOWN}${DOWN}\n${DOWN}${DOWN}${RIGHT}q" "$OUTPUT"
+assert_not_contains "$OUTPUT" 'Total requests: 150000' 'Arrow keys do not change a numeric field'
 
 OUTPUT="$TEST_DIR/output-screen.raw"
 if run_menu_with_mock_docker "${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}${DOWN}\n\nq" "$OUTPUT"; then

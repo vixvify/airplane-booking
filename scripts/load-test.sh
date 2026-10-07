@@ -7,18 +7,17 @@ source "$ROOT_DIR/scripts/lib/result_paths.sh"
 source "$ROOT_DIR/scripts/lib/terminal_ui.sh"
 
 usage() {
-  echo "Usage: bash scripts/load-test.sh <total_requests> <concurrency> <STATUS|RESERVE|CANCEL> [seat_id]" >&2
+  echo "Usage: bash scripts/load-test.sh <total_requests> <concurrency> [seat_id] (MIXED: RESERVE + CANCEL)" >&2
   exit 2
 }
 
-[ "$#" -eq 3 ] || [ "$#" -eq 4 ] || usage
+[ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage
 TOTAL_REQUESTS="$1"
 CONCURRENCY="$2"
-OPERATION="${3^^}"
-SEAT_ID="${4:-}"
+OPERATION=MIXED
+SEAT_ID="${3:-}"
 [[ "$TOTAL_REQUESTS" =~ ^[1-9][0-9]*$ ]] || usage
 [[ "$CONCURRENCY" =~ ^[1-9][0-9]*$ ]] || usage
-case "$OPERATION" in STATUS|RESERVE|CANCEL|MIXED) ;; *) usage ;; esac
 if [ -n "$SEAT_ID" ]; then
   [[ "$SEAT_ID" =~ ^([1-9]|1[0-9]|20)$ ]] || usage
 fi
@@ -26,17 +25,23 @@ fi
 RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/results}"
 mkdir -p "$RESULTS_DIR"
 RESULTS_DIR="$(cd "$RESULTS_DIR" && pwd)"
+init_runtime
+if [ "$(container delay)" != off ]; then
+  echo "Load Test requires AIRPLANE_RACE_DELAY=off on the running server. Restart it with: AIRPLANE_RACE_DELAY=off bash scripts/container.sh start <experiment> <workers>" >&2
+  exit 1
+fi
 RUN_DIR="$(create_result_dir load-tests "")"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
-init_runtime
 
 ui_banner "AIRPLANE RESERVATION - LOAD TEST"
 ui_section "CONFIGURATION"
 ui_kv "Experiment" "$EXPERIMENT"
 ui_kv "Workers" "${WORKER_COUNT:-unknown}"
+ui_kv "Race delay" "off"
 ui_kv "Total requests" "$TOTAL_REQUESTS"
 ui_kv "Concurrency" "$CONCURRENCY"
 ui_kv "Operation" "$OPERATION"
+ui_kv "Whole-run timeout" "120 seconds (including setup)"
 ui_kv "Target seat" "${SEAT_ID:-round-robin 1-20}"
 ui_kv "Results" "$RUN_DIR"
 ui_section "BENCHMARK OUTPUT"
@@ -63,17 +68,9 @@ extract_metric() {
   printf '%s' "${value:-not available}"
 }
 
-CONFLICT_COUNT=0
+# With mixed RESERVE/CANCEL, more than one successful reservation for a seat
+# may occur sequentially, so success counts alone cannot prove a seat conflict.
 : >"$RUN_DIR/seat-conflicts.txt"
-if [ "$OPERATION" = RESERVE ] && [ -n "$SEAT_ID" ]; then
-  successful_operations="$(extract_metric 'Operation OK')"
-  if [[ "$successful_operations" =~ ^[0-9]+$ ]] && [ "$successful_operations" -gt 1 ]; then
-    final_owner="$(sed -n "s/^Seat $SEAT_ID : RESERVED by //p" "$RUN_DIR/seat-map.txt" | head -n 1)"
-    printf '%s|%s successful logical clients (individual IDs not emitted)|%s\n' \
-      "$SEAT_ID" "$successful_operations" "${final_owner:-unknown}" >"$RUN_DIR/seat-conflicts.txt"
-    CONFLICT_COUNT=1
-  fi
-fi
 
 cat >"$RUN_DIR/report.txt" <<REPORT
 ============================================================================
@@ -84,9 +81,11 @@ CONFIGURATION
 -------------
 Experiment: $EXPERIMENT
 Workers: ${WORKER_COUNT:-unknown}
+Race delay: off
 Total requests: $TOTAL_REQUESTS
 Concurrency: $CONCURRENCY
 Operation: $OPERATION
+Whole-run timeout: 120 seconds (including setup)
 Target seat: ${SEAT_ID:-round-robin 1-20}
 Started at: $STARTED_AT
 
@@ -98,6 +97,7 @@ Operation succeeded: $(extract_metric 'Operation OK')
 Operation failed: $(extract_metric 'Operation Fail')
 Completion rate: $(extract_metric 'Completion Rate')
 Total time: $(extract_metric 'Total Time')
+Wall time: $(extract_metric 'Wall Time')
 Throughput: $(extract_metric 'Throughput')
 Average latency: $(extract_metric 'Average Latency')
 p95 latency: $(extract_metric 'p95 Latency')
@@ -105,7 +105,9 @@ p99 latency: $(extract_metric 'p99 Latency')
 Max latency: $(extract_metric 'Max Latency')
 Peak in-flight: $(extract_metric 'Peak In-Flight')
 Average in-flight: $(extract_metric 'Avg In-Flight')
-Consistency check: $([ "$CONFLICT_COUNT" -gt 0 ] && printf 'FAILED (%s seat conflict detected)' "$CONFLICT_COUNT" || printf 'PASSED')
+Run timeout triggered: $(extract_metric 'Run Timeout')
+Timeout phase: $(extract_metric 'Timeout Phase')
+Consistency check: NOT CHECKED (mixed operations can reserve the same seat sequentially)
 
 ARTIFACTS
 ---------
@@ -121,10 +123,14 @@ started_at=$STARTED_AT
 finished_at=$(date -u +%FT%TZ)
 experiment=$EXPERIMENT
 workers=${WORKER_COUNT:-unknown}
+race_delay=off
 container_name=${AIRPLANE_CONTAINER_NAME:-airplane-reservation}
 total_requests=$TOTAL_REQUESTS
 concurrency=$CONCURRENCY
 operation=$OPERATION
+run_timeout_seconds=120
+run_timeout_triggered=$(extract_metric 'Run Timeout')
+timeout_phase=$(extract_metric 'Timeout Phase')
 seat_id=${SEAT_ID:-round-robin 1-20}
 load_output=output.log
 server_log=server.log

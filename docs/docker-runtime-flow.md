@@ -183,7 +183,7 @@ flowchart TD
     K -->|Load Test| N[load-test.sh]
 ```
 
-ฟังก์ชัน `prepare_server` ใน `scripts/menu.sh` เป็นตัวดูแล build, หยุด container เดิม และเริ่ม server ใหม่ จึงทำให้ทุก task เริ่มด้วย seat state และ message queues ชุดใหม่
+ฟังก์ชัน `prepare_server` ใน `scripts/menu.sh` เป็นตัวดูแล build, หยุด container เดิม และเริ่ม server ใหม่ จึงทำให้ทุก task เริ่มด้วย seat state และ message queues ชุดใหม่ สำหรับ Load Test เท่านั้น TUI ส่ง `AIRPLANE_RACE_DELAY=off` เข้า server container; Experiment และ Demo ใช้ delay ตามเดิม การรัน Load Test แบบ manual ต้องเริ่ม server ด้วยค่านี้ก่อนเช่นกัน
 
 ## 5. Experiment 1-3: `concurrent-test.sh`
 
@@ -317,21 +317,23 @@ results/demos/demo1/<UTC timestamp>/
 ตัวอย่าง:
 
 ```bash
-bash scripts/load-test.sh 100000 1000 STATUS
+bash scripts/load-test.sh 100000 1000
 ```
+
+ทั้ง TUI, Bash และ PowerShell wrappers กำหนด workload เป็น `MIXED` เสมอ: แต่ละ logical client ส่ง `RESERVE`/`CANCEL` สลับกัน โดยไม่ต้องเลือก operation เอง โปรแกรม `load_test` จับเวลา 120 วินาทีตั้งแต่เริ่มรอบ รวมช่วงเตรียม logical clients หากครบเวลาแล้วยังไม่เสร็จจะหยุดส่งงานเพิ่มและคืน exit code `124`; request ที่กำลังรอใช้ deadline ไม่เกินเวลาที่เหลือ ผล timeout และ phase (`setup`/`execution`) อยู่ใน `output.log` และ summary ด้วย
 
 TUI จะ build/start server ก่อน แล้ว script เรียก executable ภายใน container:
 
 ```bash
 docker exec airplane-reservation \
-  ./load_test 100000 1000 STATUS
+  ./load_test 100000 1000 MIXED
 ```
 
 ถ้าระบุ target seat:
 
 ```bash
 docker exec airplane-reservation \
-  ./load_test 100000 1000 RESERVE 10
+  ./load_test 100000 1000 MIXED 10
 ```
 
 ### Flow
@@ -357,17 +359,19 @@ results/load-tests/<UTC timestamp>/
 Argument ตัวที่สองของ `load_test` คือจำนวน logical clients/concurrency ภายใน process `load_test` เดียว ตัวอย่างนี้:
 
 ```bash
-./load_test 100000 1000 STATUS
+./load_test 100000 1000 MIXED
 ```
 
 หมายถึง `load_test` process เดียวสร้าง 1,000 threads/logical clients เพื่อส่งรวม 100,000 requests ไม่ได้สร้าง 1,000 Docker containers และไม่ได้เรียก `./client` 1,000 ครั้ง
+
+ปัจจุบันหนึ่ง logical client เท่ากับหนึ่ง OS thread; ค่า concurrency สูงมากจึงใช้ threads/หน่วยความจำมากตามไปด้วย หากสร้าง threads ไม่ไหว โปรแกรมจะรายงาน setup failure ทันที แทนการวนรอให้ครบทั้งหมด ส่วน `total_requests` คือยอดรวมจริง: ถ้าหารด้วย concurrency ไม่ลงตัวจะกระจายเศษให้ clients ชุดแรกเพิ่มคนละหนึ่งคำสั่ง
 
 ## 8. PowerShell Load Test: `load-test.ps1`
 
 ตัวอย่าง:
 
 ```powershell
-.\scripts\load-test.ps1 100000 1000 STATUS
+.\scripts\load-test.ps1 100000 1000
 ```
 
 PowerShell script นี้ **ไม่ build image และไม่ start server** ผู้ใช้ต้องมี server container ทำงานอยู่ก่อน
@@ -377,7 +381,7 @@ PowerShell script นี้ **ไม่ build image และไม่ start ser
 ```powershell
 docker inspect --format '{{.State.Running}}' airplane-reservation
 docker inspect airplane-reservation
-docker exec airplane-reservation ./load_test 100000 1000 STATUS
+docker exec airplane-reservation ./load_test 100000 1000 MIXED
 docker logs --since <started-at> --timestamps airplane-reservation
 ```
 
