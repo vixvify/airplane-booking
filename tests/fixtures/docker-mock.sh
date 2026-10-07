@@ -77,7 +77,8 @@ case "$command" in
               ;;
             STATUS) echo "Seat $seat is AVAILABLE" ;;
             RESERVE)
-              if [ "${MOCK_RESERVE_FAIL_CLIENT:-}" = "client-$id" ]; then
+              if [ "${MOCK_RESERVE_FAIL_CLIENT:-}" = "client-$id" ] ||
+                 { [ -n "${MOCK_RESERVE_WIN_CLIENT:-}" ] && [ "$MOCK_RESERVE_WIN_CLIENT" != "client-$id" ]; }; then
                 echo "FAILED: Transaction cancelled because Seat $seat is already reserved"
               else
                 for seat_id in $seat; do echo "SUCCESS: Seat $seat_id reserved"; done
